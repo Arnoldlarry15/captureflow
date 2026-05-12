@@ -821,44 +821,44 @@ export default function App() {
 
   // ── 6. Selection handlers ─────────────────────────────────────
   const handlePointerDown = (e) => {
-  if (!isSelectingMode) return;
+    if (!isSelectingMode) return;
 
-  const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-  const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
 
-  const docX = clientX + window.scrollX;
-  const docY = clientY + window.scrollY;
+    const docX = clientX + window.scrollX;
+    const docY = clientY + window.scrollY;
 
-  mousePosRef.current = { x: clientX, y: clientY };
+    mousePosRef.current = { x: clientX, y: clientY };
 
-  setSelection({
-    startX: docX,
-    startY: docY,
-    currentX: docX,
-    currentY: docY,
-    active: true,
-  });
+    setSelection({
+      startX: docX,
+      startY: docY,
+      currentX: docX,
+      currentY: docY,
+      active: true,
+    });
 
-  startAutoScroll();
-};
+    startAutoScroll();
+  };
 
   const handlePointerMove = (e) => {
-  if (!selection.active) return;
+    if (!selection.active) return;
 
-  const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-  const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
 
-  const docX = clientX + window.scrollX;
-  const docY = clientY + window.scrollY;
+    const docX = clientX + window.scrollX;
+    const docY = clientY + window.scrollY;
 
-  mousePosRef.current = { x: clientX, y: clientY };
+    mousePosRef.current = { x: clientX, y: clientY };
 
-  setSelection(prev => ({
-    ...prev,
-    currentX: docX,
-    currentY: docY,
-  }));
-};
+    setSelection(prev => ({
+      ...prev,
+      currentX: docX,
+      currentY: docY,
+    }));
+  };
 
   const handlePointerUp = async () => {
     if (!selection.active) return;
@@ -895,9 +895,8 @@ export default function App() {
         scale: 1,
 
         // Convert document coords → element-relative coords
-        x: left - (rect.left + window.scrollX),
-        y: top - (rect.top + window.scrollY),
-
+        x:               left - (rect.left + window.scrollX),
+        y:               top - (rect.top + window.scrollY),
         width,
         height,
         backgroundColor: null,
@@ -914,7 +913,12 @@ export default function App() {
   // Shared ingestion used by both capture and manual upload
   const ingestArtifacts = useCallback(async (base64Image, textContext, taskId) => {
     try {
+      console.log('Starting Gemini extraction...');
+
       const extracted = await extractKnowledge(base64Image, textContext);
+
+      console.log('Gemini extraction complete:', extracted);
+
       // Bug fix: use Promise.all instead of forEach to properly await all writes
       await Promise.all(
         extracted.map(data =>
@@ -926,6 +930,12 @@ export default function App() {
       );
     } catch (err) {
       console.error('Ingestion error:', err);
+
+      alert(
+        `CaptureFlow Pipeline Error:\n\n${
+          err?.message || JSON.stringify(err, null, 2)
+        }`
+      );
     } finally {
       setLocalTasks(prev => prev.filter(t => t.id !== taskId));
     }
@@ -1195,11 +1205,11 @@ export default function App() {
             <div
               className="absolute border-2 border-blue-500 bg-blue-500/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.08)]"
               style={{
-                left: boxLeft - window.scrollX,
-                top: boxTop - window.scrollY,
-                width: boxWidth,
-                height: boxHeight
-           }}
+                left:   boxLeft - window.scrollX,
+                top:    boxTop - window.scrollY,
+                width:  boxWidth,
+                height: boxHeight,
+              }}
             />
           )}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
