@@ -795,23 +795,51 @@ export default function App() {
     setContextMenu({ show: true, x: e.clientX, y: e.clientY });
   };
 
-  // ── 5. Selection handlers ─────────────────────────────────────
+  // ── 5. Auto-scroll loop (~60fps while dragging near viewport edges) ──
+  const scrollIntervalRef = useRef(null);
+  const mousePosRef       = useRef({ x: 0, y: 0 });
+
+  const stopAutoScroll = useCallback(() => {
+    if (scrollIntervalRef.current) {
+      clearInterval(scrollIntervalRef.current);
+      scrollIntervalRef.current = null;
+    }
+  }, []);
+
+  const startAutoScroll = useCallback(() => {
+    stopAutoScroll();
+    scrollIntervalRef.current = setInterval(() => {
+      const { x, y } = mousePosRef.current;
+      const threshold = 60;
+      const speed     = 12;
+      if (y < threshold)                       window.scrollBy(0, -speed);
+      if (y > window.innerHeight - threshold)  window.scrollBy(0,  speed);
+      if (x < threshold)                       window.scrollBy(-speed, 0);
+      if (x > window.innerWidth  - threshold)  window.scrollBy( speed, 0);
+    }, 16);
+  }, [stopAutoScroll]);
+
+  // ── 6. Selection handlers ─────────────────────────────────────
   const handlePointerDown = (e) => {
     if (!isSelectingMode) return;
     const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    mousePosRef.current = { x, y };
     setSelection({ startX: x, startY: y, currentX: x, currentY: y, active: true });
+    startAutoScroll();
   };
 
   const handlePointerMove = (e) => {
     if (!selection.active) return;
     const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    mousePosRef.current = { x, y };
     setSelection(prev => ({ ...prev, currentX: x, currentY: y }));
   };
 
   const handlePointerUp = async () => {
     if (!selection.active) return;
+    stopAutoScroll();
     const left   = Math.min(selection.startX, selection.currentX);
     const top    = Math.min(selection.startY, selection.currentY);
     const width  = Math.abs(selection.currentX - selection.startX);
@@ -822,7 +850,7 @@ export default function App() {
     processCapture(left, top, width, height);
   };
 
-  // ── 6. Core capture + AI + persist pipeline ──────────────────
+  // ── 7. Core capture + AI + persist pipeline ──────────────────
   const processCapture = async (left, top, width, height) => {
     if (!contentRef.current || !isCanvasReady) return;
     setIsSelectingMode(false);
@@ -833,14 +861,18 @@ export default function App() {
     try {
       await new Promise(r => setTimeout(r, 50)); // allow repaint before canvas grab
 
+      // left/top are clientX/Y (viewport coords).
+      // html2canvas x/y are relative to the captured element in document space.
+      // Formula: (clientCoord - elementRect.offset) + scrollPosition
+      const rect    = contentRef.current.getBoundingClientRect();
       const scrollX = window.scrollX || window.pageXOffset;
       const scrollY = window.scrollY || window.pageYOffset;
 
       const canvas = await window.html2canvas(contentRef.current, {
         useCORS: true,
         scale: 1,
-        x: left + scrollX,
-        y: top + scrollY,
+        x: (left - rect.left) + scrollX,
+        y: (top  - rect.top)  + scrollY,
         width,
         height,
         backgroundColor: null,
