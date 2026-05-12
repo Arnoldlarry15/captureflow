@@ -821,21 +821,44 @@ export default function App() {
 
   // ── 6. Selection handlers ─────────────────────────────────────
   const handlePointerDown = (e) => {
-    if (!isSelectingMode) return;
-    const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-    const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-    mousePosRef.current = { x, y };
-    setSelection({ startX: x, startY: y, currentX: x, currentY: y, active: true });
-    startAutoScroll();
-  };
+  if (!isSelectingMode) return;
+
+  const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+  const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+
+  const docX = clientX + window.scrollX;
+  const docY = clientY + window.scrollY;
+
+  mousePosRef.current = { x: clientX, y: clientY };
+
+  setSelection({
+    startX: docX,
+    startY: docY,
+    currentX: docX,
+    currentY: docY,
+    active: true,
+  });
+
+  startAutoScroll();
+};
 
   const handlePointerMove = (e) => {
-    if (!selection.active) return;
-    const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-    const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-    mousePosRef.current = { x, y };
-    setSelection(prev => ({ ...prev, currentX: x, currentY: y }));
-  };
+  if (!selection.active) return;
+
+  const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+  const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+
+  const docX = clientX + window.scrollX;
+  const docY = clientY + window.scrollY;
+
+  mousePosRef.current = { x: clientX, y: clientY };
+
+  setSelection(prev => ({
+    ...prev,
+    currentX: docX,
+    currentY: docY,
+  }));
+};
 
   const handlePointerUp = async () => {
     if (!selection.active) return;
@@ -864,15 +887,17 @@ export default function App() {
       // left/top are clientX/Y (viewport coords).
       // html2canvas x/y are relative to the captured element in document space.
       // Formula: (clientCoord - elementRect.offset) + scrollPosition
-      const rect    = contentRef.current.getBoundingClientRect();
-      const scrollX = window.scrollX || window.pageXOffset;
-      const scrollY = window.scrollY || window.pageYOffset;
+
+      const rect = contentRef.current.getBoundingClientRect();
 
       const canvas = await window.html2canvas(contentRef.current, {
         useCORS: true,
         scale: 1,
-        x: (left - rect.left) + scrollX,
-        y: (top  - rect.top)  + scrollY,
+
+        // Convert document coords → element-relative coords
+        x: left - (rect.left + window.scrollX),
+        y: top - (rect.top + window.scrollY),
+
         width,
         height,
         backgroundColor: null,
@@ -1169,7 +1194,12 @@ export default function App() {
           {selection.active && (
             <div
               className="absolute border-2 border-blue-500 bg-blue-500/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.08)]"
-              style={{ left: boxLeft, top: boxTop, width: boxWidth, height: boxHeight }}
+              style={{
+                left: boxLeft - window.scrollX,
+                top: boxTop - window.scrollY,
+                width: boxWidth,
+                height: boxHeight
+           }}
             />
           )}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
