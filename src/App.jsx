@@ -1,30 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  X,
-  Check,
-  Copy,
-  Library,
-  Sparkles,
-  Loader2,
-  AlertCircle,
-  Network,
-  Menu,
-  LayoutGrid,
-  Scissors,
-  FileText,
-  Plus,
-  Headphones,
-  Play,
-  Pause,
-  Trash2,
-  Database,
-  Shield,
-  Cpu,
-  Brain,
-  Zap,
-  ExternalLink,
-  Github,
-  ChevronRight,
+  X, Check, Copy, Library, Sparkles, Loader2, AlertCircle,
+  Network, Menu, LayoutGrid, Scissors, FileText, Plus,
+  Headphones, Play, Pause, Trash2, Database, Shield,
+  Cpu, Brain, Zap, ExternalLink, Github, ChevronRight
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -63,13 +42,13 @@ const pcmBase64ToWavUrl = (base64) => {
   view.setUint32(4, 36 + pcmBytes.length, true);
   writeStr(8, 'WAVE');
   writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true); // chunk size
-  view.setUint16(20, 1, true); // PCM format
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, 24000, true); // sample rate
-  view.setUint32(28, 48000, true); // byte rate (24000 * 2)
-  view.setUint16(32, 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
+  view.setUint32(16, 16, true);       // chunk size
+  view.setUint16(20, 1, true);        // PCM format
+  view.setUint16(22, 1, true);        // mono
+  view.setUint32(24, 24000, true);    // sample rate
+  view.setUint32(28, 48000, true);    // byte rate (24000 * 2)
+  view.setUint16(32, 2, true);        // block align
+  view.setUint16(34, 16, true);       // bits per sample
   writeStr(36, 'data');
   view.setUint32(40, pcmBytes.length, true);
   new Uint8Array(buffer, 44).set(pcmBytes);
@@ -93,12 +72,13 @@ const fetchWithBackoff = async (url, options, retries = 3) => {
       return await res.json();
     } catch (error) {
       if (i === retries - 1 || error.message.includes('Bad Request')) throw error;
-      await new Promise((r) => setTimeout(r, delays[i]));
+      await new Promise(r => setTimeout(r, delays[i]));
     }
   }
 };
 
-const geminiUrl = (model, key) => `${GEMINI_BASE}/models/${model}:generateContent?key=${key}`;
+const geminiUrl = (model, key) =>
+  `${GEMINI_BASE}/models/${model}:generateContent?key=${key}`;
 
 // ============================================================
 // AI — KNOWLEDGE EXTRACTION
@@ -108,15 +88,11 @@ const extractKnowledge = async (base64Image = null, textContext = null) => {
 
   const parts = base64Image
     ? [
-        {
-          text: 'Analyze the exact contents of this visual selection. Extract all relevant information into distinct, highly structured knowledge artifacts. Do not invent information.',
-        },
+        { text: 'Analyze the exact contents of this visual selection. Extract all relevant information into distinct, highly structured knowledge artifacts. Do not invent information.' },
         { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
       ]
     : [
-        {
-          text: `Analyze the following manually uploaded text source. Extract the core concepts into highly structured knowledge artifacts.\n\n${textContext}`,
-        },
+        { text: `Analyze the following manually uploaded text source. Extract the core concepts into highly structured knowledge artifacts.\n\n${textContext}` },
       ];
 
   const payload = {
@@ -132,10 +108,10 @@ const extractKnowledge = async (base64Image = null, textContext = null) => {
             items: {
               type: 'OBJECT',
               properties: {
-                title: { type: 'STRING' },
+                title:    { type: 'STRING' },
                 category: { type: 'STRING' },
-                content: { type: 'STRING' },
-                tags: { type: 'ARRAY', items: { type: 'STRING' } },
+                content:  { type: 'STRING' },
+                tags:     { type: 'ARRAY', items: { type: 'STRING' } },
               },
               required: ['title', 'category', 'content', 'tags'],
             },
@@ -145,11 +121,10 @@ const extractKnowledge = async (base64Image = null, textContext = null) => {
     },
   };
 
-  const result = await fetchWithBackoff(geminiUrl(GEMINI_MODEL, GEMINI_API_KEY), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  const result = await fetchWithBackoff(
+    geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+  );
 
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Invalid AI response format.');
@@ -161,47 +136,47 @@ const extractKnowledge = async (base64Image = null, textContext = null) => {
     const parsed = JSON.parse(raw.substring(start, end + 1));
     if (parsed.artifacts?.length) return parsed.artifacts;
     throw new Error('Empty artifacts array');
-  } catch {
-    // Graceful fallback — never lose a capture silently
-    return [
-      {
-        title: 'Raw Capture',
-        category: 'Unstructured',
-        content: 'Selection captured but could not be structured automatically.',
-        tags: ['raw', 'unstructured'],
-      },
-    ];
-  }
+  } catch (err) {
+  console.warn('Gemini failed, using offline fallback:', err);
+
+  return [{
+    title: base64Image ? 'Captured Region (Offline Mode)' : 'Text Capture (Offline Mode)',
+    category: 'Unstructured Capture',
+    content: textContext
+      ? textContext.slice(0, 2000)
+      : 'Visual capture stored locally. AI service unavailable or quota exceeded.',
+    tags: ['offline', 'fallback']
+  }];
+}
 };
 
 // ============================================================
 // AI — REPORT GENERATION
 // ============================================================
 const REPORT_PROMPTS = {
-  summary:
-    'Write a comprehensive Executive Summary synthesizing all these artifacts. Connect the dots, surface key themes, and provide actionable insights.',
-  graph:
-    'Create a structured Knowledge Graph of these artifacts. List entity relationships clearly using: [Entity A] --(relationship)--> [Entity B]. Group by domain.',
-  slides:
-    'Convert these artifacts into a Slide Deck Outline. For each slide include: a punchy title, 3–5 bullet points, and a speaker note.',
-  audio_script:
-    'Write an engaging, conversational solo-podcast briefing summarizing this data. Speak directly to the listener. Make it flow naturally, around 200 words. No stage directions.',
+  summary:      'Write a comprehensive Executive Summary synthesizing all these artifacts. Connect the dots, surface key themes, and provide actionable insights.',
+  graph:        'Create a structured Knowledge Graph of these artifacts. List entity relationships clearly using: [Entity A] --(relationship)--> [Entity B]. Group by domain.',
+  slides:       'Convert these artifacts into a Slide Deck Outline. For each slide include: a punchy title, 3–5 bullet points, and a speaker note.',
+  audio_script: 'Write an engaging, conversational solo-podcast briefing summarizing this data. Speak directly to the listener. Make it flow naturally, around 200 words. No stage directions.',
 };
 
 const generateReport = async (artifacts, reportType) => {
   if (!GEMINI_API_KEY) throw new Error('Missing VITE_GEMINI_API_KEY in environment.');
 
-  const data = artifacts.map((a) => `- ${a.title}: ${a.content}`).join('\n');
+  const data = artifacts.map(a => `- ${a.title}: ${a.content}`).join('\n');
   const prompt = `${REPORT_PROMPTS[reportType]}\n\nSource Data:\n${data}`;
 
-  const result = await fetchWithBackoff(geminiUrl(GEMINI_MODEL, GEMINI_API_KEY), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4 },
-    }),
-  });
+  const result = await fetchWithBackoff(
+    geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4 },
+      }),
+    }
+  );
 
   return result.candidates?.[0]?.content?.parts?.[0]?.text || 'Generation failed.';
 };
@@ -212,21 +187,20 @@ const generateReport = async (artifacts, reportType) => {
 const generateTTSAudio = async (text) => {
   if (!GEMINI_API_KEY) throw new Error('Missing VITE_GEMINI_API_KEY in environment.');
 
-  const result = await fetchWithBackoff(geminiUrl(GEMINI_TTS_MODEL, GEMINI_API_KEY), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [{ text: `Read the following briefing naturally and professionally:\n\n${text}` }],
+  const result = await fetchWithBackoff(
+    geminiUrl(GEMINI_TTS_MODEL, GEMINI_API_KEY),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `Read the following briefing naturally and professionally:\n\n${text}` }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } },
         },
-      ],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } },
-      },
-    }),
-  });
+      }),
+    }
+  );
 
   const base64PCM = result.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64PCM) throw new Error('TTS generation returned no audio data.');
@@ -275,11 +249,7 @@ const db = {
   subscribeToArtifacts(sessionId, callback) {
     return supabase
       .channel('artifacts-channel')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'artifacts', filter: `session_id=eq.${sessionId}` },
-        callback
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'artifacts', filter: `session_id=eq.${sessionId}` }, callback)
       .subscribe();
   },
 };
@@ -292,8 +262,7 @@ const LA_BUILDS_PROJECTS = [
     id: 'captureflow',
     name: 'CaptureFlow',
     tagline: 'AI-Native Cognitive Infrastructure',
-    description:
-      'The foundation layer — reducing friction between human thought and structured machine memory. Drag-to-capture cognitive offload. Semantic indexing. Persistent external memory that AI can reason over continuously. Built on Gemini Vision, Supabase, React. Deployed and live.',
+    description: 'The foundation layer — reducing friction between human thought and structured machine memory. Drag-to-capture cognitive offload. Semantic indexing. Persistent external memory that AI can reason over continuously. Built on Gemini Vision, Supabase, React. Deployed and live.',
     status: 'Live',
     statusColor: 'emerald',
     tags: ['Cognitive Interface', 'Gemini API', 'Semantic Memory', 'React', 'Supabase'],
@@ -305,8 +274,7 @@ const LA_BUILDS_PROJECTS = [
     id: 'ares',
     name: 'ARES Dashboard',
     tagline: 'Automated Red-Teaming',
-    description:
-      'Automated Red Team Payload Generator that produces adversarial payloads based on OWASP Top 10, MITRE ATT&CK, and MITRE ATLAS frameworks. Systematic vulnerability surfacing for LLMs before they reach production.',
+    description: 'Automated Red Team Payload Generator that produces adversarial payloads based on OWASP Top 10, MITRE ATT&CK, and MITRE ATLAS frameworks. Systematic vulnerability surfacing for LLMs before they reach production.',
     status: 'Live v1.0',
     statusColor: 'blue',
     tags: ['AI Safety', 'LLM Security', 'OWASP', 'MITRE ATT&CK', 'Vercel'],
@@ -316,8 +284,7 @@ const LA_BUILDS_PROJECTS = [
     id: 'redset',
     name: 'Red Set ProtoCell',
     tagline: 'Dual-Agent Evolutionary Engine',
-    description:
-      'Systematic adversarial testing platform for LLMs. Sniper/Spotter dual-agent architecture where one model attacks and another evaluates — evolving payloads across generations. Governed by the EGG (Evolutionary Governance Grid) layer with a 3-tier scoring taxonomy.',
+    description: 'Systematic adversarial testing platform for LLMs. Sniper/Spotter dual-agent architecture where one model attacks and another evaluates — evolving payloads across generations. Governed by the EGG (Evolutionary Governance Grid) layer with a 3-tier scoring taxonomy.',
     status: '~90% Complete',
     statusColor: 'blue',
     tags: ['Multi-Agent', 'Evolutionary AI', 'EGG Governance', 'Safety Research'],
@@ -329,8 +296,7 @@ const LA_BUILDS_PROJECTS = [
     id: 'aicp',
     name: 'AI Control Plane',
     tagline: 'Governance Orchestration Layer',
-    description:
-      'Infrastructure sitting above AI deployments — enforcing policy, monitoring behavior, and providing override controls for autonomous systems. Designed as infrastructure, not a product. The control plane between humans and their AI.',
+    description: 'Infrastructure sitting above AI deployments — enforcing policy, monitoring behavior, and providing override controls for autonomous systems. Designed as infrastructure, not a product. The control plane between humans and their AI.',
     status: '~70% Complete',
     statusColor: 'amber',
     tags: ['Governance', 'Orchestration', 'AI Safety', 'Infrastructure'],
@@ -341,8 +307,7 @@ const LA_BUILDS_PROJECTS = [
     id: 'sentinel',
     name: 'Sentinel Protocol',
     tagline: 'Unified Safety Ecosystem',
-    description:
-      'The umbrella ecosystem connecting ARES, Red Set, and AI Control Plane. Shared threat intelligence, unified scoring frameworks, and cross-tool data pipelines — turning isolated safety tools into a coherent defensive posture.',
+    description: 'The umbrella ecosystem connecting ARES, Red Set, and AI Control Plane. Shared threat intelligence, unified scoring frameworks, and cross-tool data pipelines — turning isolated safety tools into a coherent defensive posture.',
     status: 'In Progress',
     statusColor: 'amber',
     tags: ['Ecosystem', 'AI Safety', 'Threat Intelligence', 'Multi-Tool'],
@@ -353,8 +318,7 @@ const LA_BUILDS_PROJECTS = [
     id: 'rsea',
     name: 'RSEA',
     tagline: 'Self-Protecting AI Agent',
-    description:
-      "An AI agent built for self-protection and platform security within Moltbook — operating with a mandate toward beneficial outcomes. RSEA represents the applied edge of Sentinel Protocol: an agent that doesn't just follow safety rules, but actively enforces them within its operational context.",
+    description: 'An AI agent built for self-protection and platform security within Moltbook — operating with a mandate toward beneficial outcomes. RSEA represents the applied edge of Sentinel Protocol: an agent that doesn\'t just follow safety rules, but actively enforces them within its operational context.',
     status: 'In Development',
     statusColor: 'violet',
     tags: ['Autonomous Agent', 'Self-Protection', 'Moltbook', 'Applied Safety'],
@@ -364,9 +328,9 @@ const LA_BUILDS_PROJECTS = [
 
 const STATUS_COLORS = {
   emerald: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  blue: 'bg-blue-100 text-blue-800 border-blue-200',
-  amber: 'bg-amber-100 text-amber-800 border-amber-200',
-  violet: 'bg-violet-100 text-violet-800 border-violet-200',
+  blue:    'bg-blue-100 text-blue-800 border-blue-200',
+  amber:   'bg-amber-100 text-amber-800 border-amber-200',
+  violet:  'bg-violet-100 text-violet-800 border-violet-200',
 };
 
 // ============================================================
@@ -399,56 +363,38 @@ function MockBrowser({ children, url = 'labuilds.vercel.app' }) {
 function ProjectCard({ project }) {
   const Icon = project.icon;
   return (
-    <div
-      className={`bg-white border rounded-2xl p-6 hover:shadow-lg hover:border-slate-300 transition-all group ${project.featured ? 'border-indigo-200 md:col-span-2' : 'border-slate-200'}`}
-    >
+    <div className={`bg-white border rounded-2xl p-6 hover:shadow-lg hover:border-slate-300 transition-all group ${project.featured ? 'border-indigo-200 md:col-span-2' : 'border-slate-200'}`}>
       <div className="flex items-start justify-between mb-4">
-        {project.logo ? (
-          <img
-            src={project.logo}
-            alt={project.name}
-            className="w-10 h-10 rounded-xl object-cover border border-slate-100"
-          />
-        ) : (
-          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
-            <Icon className="w-5 h-5 text-white" />
-          </div>
-        )}
+        {project.logo
+          ? <img src={project.logo} alt={project.name} className="w-10 h-10 rounded-xl object-cover border border-slate-100" />
+          : <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
+              <Icon className="w-5 h-5 text-white" />
+            </div>
+        }
         <div className="flex items-center gap-2">
           {project.featured && (
             <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border bg-indigo-100 text-indigo-700 border-indigo-200">
               ★ Featured
             </span>
           )}
-          <span
-            className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${STATUS_COLORS[project.statusColor]}`}
-          >
+          <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${STATUS_COLORS[project.statusColor]}`}>
             {project.status}
           </span>
         </div>
       </div>
       <h3 className="font-black text-slate-900 text-lg mb-1">{project.name}</h3>
-      <p className="text-xs font-semibold text-indigo-600 mb-3 uppercase tracking-wide">
-        {project.tagline}
-      </p>
+      <p className="text-xs font-semibold text-indigo-600 mb-3 uppercase tracking-wide">{project.tagline}</p>
       <p className="text-sm text-slate-600 leading-relaxed mb-4">{project.description}</p>
       <div className="flex flex-wrap gap-1.5 mb-3">
-        {project.tags.map((tag) => (
-          <span
-            key={tag}
-            className="text-[10px] font-medium text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full"
-          >
+        {project.tags.map(tag => (
+          <span key={tag} className="text-[10px] font-medium text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full">
             {tag}
           </span>
         ))}
       </div>
       {project.link && (
-        <a
-          href={project.link}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
-        >
+        <a href={project.link} target="_blank" rel="noreferrer"
+          className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
           <ExternalLink className="w-3 h-3" /> {project.link.replace('https://', '')}
         </a>
       )}
@@ -483,45 +429,26 @@ function ArtifactCard({ artifact, onDelete }) {
   const isReport = artifact.type === 'report';
 
   return (
-    <div
-      className={`bg-white rounded-2xl p-5 shadow-sm border transition-shadow flex flex-col ${isReport ? 'border-indigo-200' : 'border-slate-200 hover:shadow-md'}`}
-    >
+    <div className={`bg-white rounded-2xl p-5 shadow-sm border transition-shadow flex flex-col ${isReport ? 'border-indigo-200' : 'border-slate-200 hover:shadow-md'}`}>
       <div className="flex justify-between items-start mb-3 gap-2">
-        <span
-          className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${isReport ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}
-        >
+        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${isReport ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
           {isReport && <Sparkles className="w-3 h-3 inline mr-1" />}
           {artifact.category}
         </span>
         <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={handleCopy}
-            className="text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
-            title="Copy"
-          >
+          <button onClick={handleCopy} className="text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors" title="Copy">
             {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
           </button>
-          <button
-            onClick={onDelete}
-            className="text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-            title="Delete"
-          >
+          <button onClick={onDelete} className="text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-1.5 rounded-lg transition-colors" title="Delete">
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
-      <h3 className="font-extrabold text-slate-900 text-base mb-2 leading-tight">
-        {artifact.title}
-      </h3>
-      <p className="text-sm text-slate-600 mb-4 whitespace-pre-wrap leading-relaxed flex-1">
-        {artifact.content}
-      </p>
+      <h3 className="font-extrabold text-slate-900 text-base mb-2 leading-tight">{artifact.title}</h3>
+      <p className="text-sm text-slate-600 mb-4 whitespace-pre-wrap leading-relaxed flex-1">{artifact.content}</p>
       <div className="flex flex-wrap gap-1.5 mt-auto">
         {artifact.tags?.map((tag, i) => (
-          <span
-            key={i}
-            className="text-[11px] font-medium text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full"
-          >
+          <span key={i} className="text-[11px] font-medium text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full">
             #{tag.toLowerCase().replace(/\s+/g, '')}
           </span>
         ))}
@@ -534,12 +461,12 @@ function ArtifactCard({ artifact, onDelete }) {
 // AUDIO REPORT CARD — real progress bar wired to HTMLAudioElement
 // ============================================================
 function AudioReportCard({ report, onDelete }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [audioUrl, setAudioUrl] = useState(null);
-  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying]       = useState(false);
+  const [isLoading, setIsLoading]       = useState(false);
+  const [progress, setProgress]         = useState(0);
+  const [duration, setDuration]         = useState(0);
+  const [audioUrl, setAudioUrl]         = useState(null);
+  const audioRef                        = useRef(null);
 
   // Cleanup blob URL on unmount to prevent memory leaks
   useEffect(() => {
@@ -609,9 +536,7 @@ function AudioReportCard({ report, onDelete }) {
   const formatTime = (secs) => {
     if (!secs || isNaN(secs)) return '0:00';
     const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60)
-      .toString()
-      .padStart(2, '0');
+    const s = Math.floor(secs % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
 
@@ -621,10 +546,7 @@ function AudioReportCard({ report, onDelete }) {
         <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border bg-indigo-900/50 text-indigo-300 border-indigo-800 flex items-center gap-1">
           <Headphones className="w-3 h-3" /> Audio Briefing
         </span>
-        <button
-          onClick={onDelete}
-          className="text-slate-500 hover:text-red-400 transition-colors p-1"
-        >
+        <button onClick={onDelete} className="text-slate-500 hover:text-red-400 transition-colors p-1">
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
@@ -638,13 +560,12 @@ function AudioReportCard({ report, onDelete }) {
             disabled={isLoading}
             className="w-12 h-12 bg-indigo-500 hover:bg-indigo-400 rounded-full flex items-center justify-center transition-colors shrink-0 disabled:opacity-50"
           >
-            {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="w-5 h-5 fill-white" />
-            ) : (
-              <Play className="w-5 h-5 fill-white ml-0.5" />
-            )}
+            {isLoading
+              ? <Loader2 className="w-5 h-5 animate-spin" />
+              : isPlaying
+                ? <Pause className="w-5 h-5 fill-white" />
+                : <Play className="w-5 h-5 fill-white ml-0.5" />
+            }
           </button>
 
           <div className="flex-1 space-y-1">
@@ -660,9 +581,7 @@ function AudioReportCard({ report, onDelete }) {
             </div>
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
               <span>{formatTime(audioRef.current?.currentTime)}</span>
-              <span>
-                {duration ? formatTime(duration) : audioUrl ? '...' : 'Click play to generate'}
-              </span>
+              <span>{duration ? formatTime(duration) : (audioUrl ? '...' : 'Click play to generate')}</span>
             </div>
           </div>
         </div>
@@ -680,7 +599,7 @@ function AudioReportCard({ report, onDelete }) {
 // SOURCE UPLOADER TAB
 // ============================================================
 function SourceUploader({ onInject, setActiveTab }) {
-  const [text, setText] = useState('');
+  const [text, setText]           = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
   const handleUpload = async () => {
@@ -699,14 +618,11 @@ function SourceUploader({ onInject, setActiveTab }) {
     <div className="flex flex-col gap-4 h-full">
       <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl">
         <h3 className="font-bold text-indigo-900 text-sm mb-1">Manual Data Injection</h3>
-        <p className="text-xs text-indigo-700">
-          Paste articles, notes, or code. The AI will instantly structure it into artifacts for your
-          workspace.
-        </p>
+        <p className="text-xs text-indigo-700">Paste articles, notes, or code. The AI will instantly structure it into artifacts for your workspace.</p>
       </div>
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={e => setText(e.target.value)}
         placeholder="Paste your source text here..."
         className="flex-1 min-h-[200px] w-full p-4 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-sm shadow-inner"
       />
@@ -726,10 +642,10 @@ function SourceUploader({ onInject, setActiveTab }) {
 // REPORT GENERATOR TAB
 // ============================================================
 const REPORT_TYPES = [
-  { key: 'summary', label: 'Exec Summary', Icon: FileText, dark: false },
-  { key: 'graph', label: 'Knowledge Graph', Icon: Network, dark: false },
-  { key: 'slides', label: 'Slide Deck', Icon: LayoutGrid, dark: false },
-  { key: 'audio_script', label: 'Audio Briefing', Icon: Headphones, dark: true },
+  { key: 'summary',      label: 'Exec Summary',    Icon: FileText,    dark: false },
+  { key: 'graph',        label: 'Knowledge Graph', Icon: Network,     dark: false },
+  { key: 'slides',       label: 'Slide Deck',      Icon: LayoutGrid,  dark: false },
+  { key: 'audio_script', label: 'Audio Briefing',  Icon: Headphones,  dark: true  },
 ];
 
 function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onDelete }) {
@@ -753,9 +669,7 @@ function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onD
         </h3>
         <p className="text-xs text-slate-500 mb-4">
           Transform your collected artifacts into unified assets.
-          {dataArtifacts.length === 0 && (
-            <span className="text-amber-600 ml-1">Capture some data first.</span>
-          )}
+          {dataArtifacts.length === 0 && <span className="text-amber-600 ml-1">Capture some data first.</span>}
         </p>
         <div className="grid grid-cols-2 gap-2">
           {REPORT_TYPES.map(({ key, label, Icon, dark }) => (
@@ -764,17 +678,15 @@ function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onD
               onClick={() => handleGenerate(key)}
               disabled={!!isGenerating || dataArtifacts.length === 0}
               className={`px-3 py-2.5 rounded-lg text-xs font-semibold text-left flex flex-col gap-1.5 transition-colors disabled:opacity-40 border
-                ${
-                  dark
-                    ? 'bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700 shadow-sm'
-                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200'
+                ${dark
+                  ? 'bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700 shadow-sm'
+                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200'
                 }`}
             >
-              {isGenerating === key ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Icon className="w-4 h-4" />
-              )}
+              {isGenerating === key
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <Icon className="w-4 h-4" />
+              }
               {label}
             </button>
           ))}
@@ -792,12 +704,10 @@ function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onD
         <p className="text-center text-xs text-slate-400 mt-8">No reports generated yet.</p>
       )}
 
-      {reportArtifacts.map((report) =>
-        report.type === 'audio' ? (
-          <AudioReportCard key={report.id} report={report} onDelete={() => onDelete(report.id)} />
-        ) : (
-          <ArtifactCard key={report.id} artifact={report} onDelete={() => onDelete(report.id)} />
-        )
+      {reportArtifacts.map(report =>
+        report.type === 'audio'
+          ? <AudioReportCard key={report.id} report={report} onDelete={() => onDelete(report.id)} />
+          : <ArtifactCard    key={report.id} artifact={report} onDelete={() => onDelete(report.id)} />
       )}
     </div>
   );
@@ -807,22 +717,16 @@ function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onD
 // ROOT APP
 // ============================================================
 export default function App() {
-  const [artifacts, setArtifacts] = useState([]);
-  const [localTasks, setLocalTasks] = useState([]);
-  const [sessionId, setSessionId] = useState(null);
+  const [artifacts, setArtifacts]         = useState([]);
+  const [localTasks, setLocalTasks]       = useState([]);
+  const [sessionId, setSessionId]         = useState(null);
 
   const [isSelectingMode, setIsSelectingMode] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('data');
-  const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0 });
-  const [selection, setSelection] = useState({
-    startX: 0,
-    startY: 0,
-    currentX: 0,
-    currentY: 0,
-    active: false,
-  });
-  const [isCanvasReady, setIsCanvasReady] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen]     = useState(false);
+  const [activeTab, setActiveTab]             = useState('data');
+  const [contextMenu, setContextMenu]         = useState({ show: false, x: 0, y: 0 });
+  const [selection, setSelection]             = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0, active: false });
+  const [isCanvasReady, setIsCanvasReady]     = useState(false);
 
   const contentRef = useRef(null);
 
@@ -857,17 +761,12 @@ export default function App() {
 
   // ── 3. html2canvas script loader ────────────────────────────
   useEffect(() => {
-    if (window.html2canvas) {
-      setIsCanvasReady(true);
-      return;
-    }
+    if (window.html2canvas) { setIsCanvasReady(true); return; }
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     script.onload = () => setIsCanvasReady(true);
     document.body.appendChild(script);
-    return () => {
-      if (document.body.contains(script)) document.body.removeChild(script);
-    };
+    return () => { if (document.body.contains(script)) document.body.removeChild(script); };
   }, []);
 
   // ── 4. Global hotkeys + context menu dismiss ─────────────────
@@ -875,7 +774,7 @@ export default function App() {
     const onKeyDown = (e) => {
       if (e.ctrlKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
-        setIsSelectingMode((prev) => !prev);
+        setIsSelectingMode(prev => !prev);
         setIsSidebarOpen(false);
       }
       if (e.key === 'Escape') {
@@ -901,7 +800,7 @@ export default function App() {
 
   // ── 5. Auto-scroll loop (~60fps while dragging near viewport edges) ──
   const scrollIntervalRef = useRef(null);
-  const mousePosRef = useRef({ x: 0, y: 0 });
+  const mousePosRef       = useRef({ x: 0, y: 0 });
 
   const stopAutoScroll = useCallback(() => {
     if (scrollIntervalRef.current) {
@@ -915,11 +814,11 @@ export default function App() {
     scrollIntervalRef.current = setInterval(() => {
       const { x, y } = mousePosRef.current;
       const threshold = 60;
-      const speed = 12;
-      if (y < threshold) window.scrollBy(0, -speed);
-      if (y > window.innerHeight - threshold) window.scrollBy(0, speed);
-      if (x < threshold) window.scrollBy(-speed, 0);
-      if (x > window.innerWidth - threshold) window.scrollBy(speed, 0);
+      const speed     = 12;
+      if (y < threshold)                       window.scrollBy(0, -speed);
+      if (y > window.innerHeight - threshold)  window.scrollBy(0,  speed);
+      if (x < threshold)                       window.scrollBy(-speed, 0);
+      if (x > window.innerWidth  - threshold)  window.scrollBy( speed, 0);
     }, 16);
   }, [stopAutoScroll]);
 
@@ -957,7 +856,7 @@ export default function App() {
 
     mousePosRef.current = { x: clientX, y: clientY };
 
-    setSelection((prev) => ({
+    setSelection(prev => ({
       ...prev,
       currentX: docX,
       currentY: docY,
@@ -967,16 +866,13 @@ export default function App() {
   const handlePointerUp = async () => {
     if (!selection.active) return;
     stopAutoScroll();
-    const left = Math.min(selection.startX, selection.currentX);
-    const top = Math.min(selection.startY, selection.currentY);
-    const width = Math.abs(selection.currentX - selection.startX);
+    const left   = Math.min(selection.startX, selection.currentX);
+    const top    = Math.min(selection.startY, selection.currentY);
+    const width  = Math.abs(selection.currentX - selection.startX);
     const height = Math.abs(selection.currentY - selection.startY);
-    setSelection((prev) => ({ ...prev, active: false }));
+    setSelection(prev => ({ ...prev, active: false }));
 
-    if (width < 15 || height < 15) {
-      setIsSelectingMode(false);
-      return;
-    }
+    if (width < 15 || height < 15) { setIsSelectingMode(false); return; }
     processCapture(left, top, width, height);
   };
 
@@ -986,10 +882,10 @@ export default function App() {
     setIsSelectingMode(false);
 
     const taskId = `task_${Date.now()}`;
-    setLocalTasks((prev) => [{ id: taskId, message: 'Synthesizing visual region…' }, ...prev]);
+    setLocalTasks(prev => [{ id: taskId, message: 'Synthesizing visual region…' }, ...prev]);
 
     try {
-      await new Promise((r) => setTimeout(r, 50)); // allow repaint before canvas grab
+      await new Promise(r => setTimeout(r, 50)); // allow repaint before canvas grab
 
       // left/top are clientX/Y (viewport coords).
       // html2canvas x/y are relative to the captured element in document space.
@@ -1002,8 +898,8 @@ export default function App() {
         scale: 1,
 
         // Convert document coords → element-relative coords
-        x: left - (rect.left + window.scrollX),
-        y: top - (rect.top + window.scrollY),
+        x:               left - (rect.left + window.scrollX),
+        y:               top - (rect.top + window.scrollY),
         width,
         height,
         backgroundColor: null,
@@ -1013,7 +909,7 @@ export default function App() {
       await ingestArtifacts(base64, null, taskId);
     } catch (err) {
       console.error('Capture error:', err);
-      setLocalTasks((prev) => prev.filter((t) => t.id !== taskId));
+      setLocalTasks(prev => prev.filter(t => t.id !== taskId));
     }
   };
 
@@ -1028,7 +924,7 @@ export default function App() {
 
       // Bug fix: use Promise.all instead of forEach to properly await all writes
       await Promise.all(
-        extracted.map((data) =>
+        extracted.map(data =>
           db.saveArtifact({
             ...data,
             type: base64Image ? 'capture' : 'source',
@@ -1038,50 +934,48 @@ export default function App() {
     } catch (err) {
       console.error('Ingestion error:', err);
 
-      alert(`CaptureFlow Pipeline Error:\n\n${err?.message || JSON.stringify(err, null, 2)}`);
+      alert(
+        `CaptureFlow Pipeline Error:\n\n${
+          err?.message || JSON.stringify(err, null, 2)
+        }`
+      );
     } finally {
-      setLocalTasks((prev) => prev.filter((t) => t.id !== taskId));
+      setLocalTasks(prev => prev.filter(t => t.id !== taskId));
     }
   }, []);
 
-  const handleManualInject = useCallback(
-    async (base64, text) => {
-      const taskId = `task_${Date.now()}`;
-      setLocalTasks((prev) => [{ id: taskId, message: 'Parsing manual input…' }, ...prev]);
-      await ingestArtifacts(base64, text, taskId);
-    },
-    [ingestArtifacts]
-  );
+  const handleManualInject = useCallback(async (base64, text) => {
+    const taskId = `task_${Date.now()}`;
+    setLocalTasks(prev => [{ id: taskId, message: 'Parsing manual input…' }, ...prev]);
+    await ingestArtifacts(base64, text, taskId);
+  }, [ingestArtifacts]);
 
   // ── Derived state ─────────────────────────────────────────────
-  const dataArtifacts = artifacts.filter((a) => a.type === 'capture' || a.type === 'source');
-  const reportArtifacts = artifacts.filter((a) => a.type === 'report' || a.type === 'audio');
-  const totalBadge = dataArtifacts.length + localTasks.length;
+  const dataArtifacts   = artifacts.filter(a => a.type === 'capture' || a.type === 'source');
+  const reportArtifacts = artifacts.filter(a => a.type === 'report'  || a.type === 'audio');
+  const totalBadge      = dataArtifacts.length + localTasks.length;
 
   // ── 7. Report generation ──────────────────────────────────────
-  const handleGenerateReport = useCallback(
-    async (type) => {
-      try {
-        const text = await generateReport(dataArtifacts, type);
-        const categoryMap = {
-          summary: 'Executive Summary',
-          graph: 'Knowledge Graph',
-          slides: 'Slide Outline',
-          audio_script: 'Podcast Script',
-        };
-        await db.saveArtifact({
-          title: categoryMap[type],
-          category: 'Generated Report',
-          content: text,
-          tags: [type, 'synthesis'],
-          type: type === 'audio_script' ? 'audio' : 'report',
-        });
-      } catch (err) {
-        console.error('Report generation error:', err);
-      }
-    },
-    [dataArtifacts]
-  );
+  const handleGenerateReport = useCallback(async (type) => {
+    try {
+      const text = await generateReport(dataArtifacts, type);
+      const categoryMap = {
+        summary:      'Executive Summary',
+        graph:        'Knowledge Graph',
+        slides:       'Slide Outline',
+        audio_script: 'Podcast Script',
+      };
+      await db.saveArtifact({
+        title:    categoryMap[type],
+        category: 'Generated Report',
+        content:  text,
+        tags:     [type, 'synthesis'],
+        type:     type === 'audio_script' ? 'audio' : 'report',
+      });
+    } catch (err) {
+      console.error('Report generation error:', err);
+    }
+  }, [dataArtifacts]);
 
   const handleDelete = useCallback(async (id) => {
     try {
@@ -1091,9 +985,9 @@ export default function App() {
     }
   }, []);
 
-  const boxLeft = Math.min(selection.startX, selection.currentX);
-  const boxTop = Math.min(selection.startY, selection.currentY);
-  const boxWidth = Math.abs(selection.currentX - selection.startX);
+  const boxLeft   = Math.min(selection.startX, selection.currentX);
+  const boxTop    = Math.min(selection.startY, selection.currentY);
+  const boxWidth  = Math.abs(selection.currentX - selection.startX);
   const boxHeight = Math.abs(selection.currentY - selection.startY);
 
   // ─────────────────────────────────────────────────────────────
@@ -1102,6 +996,7 @@ export default function App() {
       className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-200 relative overflow-x-hidden"
       onContextMenu={handleContextMenu}
     >
+
       {/* ── Hamburger (top right) ── */}
       <div className="fixed top-4 right-4 z-[45]">
         <button
@@ -1136,8 +1031,10 @@ export default function App() {
 
       {/* ── MOCK PAGE: LABuilds ── */}
       <main ref={contentRef} className="max-w-5xl mx-auto px-6 pb-32 pt-8">
+
         <MockBrowser url="labuilds.vercel.app">
           <div className="p-8 bg-white">
+
             {/* Hero */}
             <header className="mb-10 border-b border-slate-100 pb-10">
               <div className="flex items-start justify-between mb-6">
@@ -1146,42 +1043,31 @@ export default function App() {
                     <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
                       <Zap className="w-4 h-4 text-white" />
                     </div>
-                    <span className="font-black text-xl tracking-tight text-slate-900">
-                      LA Builds
-                    </span>
+                    <span className="font-black text-xl tracking-tight text-slate-900">LA Builds</span>
                   </div>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-widest">
-                    Independent AI Systems Engineering
-                  </p>
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-widest">Independent AI Systems Engineering</p>
                 </div>
                 <div className="flex gap-2">
-                  <a
-                    href="https://github.com/Arnoldlarry15"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                  >
+                  <a href="https://github.com/Arnoldlarry15" target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
                     <Github className="w-3.5 h-3.5" /> GitHub
                   </a>
                 </div>
               </div>
 
               <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-tight mb-4">
-                Building AI tools
-                <br />
-                <span className="text-indigo-600">that solve real</span>
-                <br />
+                Building AI tools<br />
+                <span className="text-indigo-600">that solve real</span><br />
                 problems.
               </h1>
               <p className="text-lg text-slate-600 max-w-2xl leading-relaxed">
-                Multi-agent architectures, automated red-teaming, cognitive memory interfaces, and
-                AI governance layers. Battle-tested technology. No hypotheticals.
+                Multi-agent architectures, automated red-teaming, cognitive memory interfaces, and AI governance layers. Battle-tested technology. No hypotheticals.
               </p>
 
               <div className="mt-6 flex items-center gap-3 flex-wrap text-sm">
                 <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-full font-semibold text-xs">
-                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />3
-                  Projects Live
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                  3 Projects Live
                 </span>
                 <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full font-semibold text-xs">
                   2 In Progress
@@ -1196,11 +1082,7 @@ export default function App() {
             <div className="mb-8 bg-indigo-50 border border-indigo-100 rounded-xl px-5 py-3 flex items-center gap-3 text-sm text-indigo-800">
               <Scissors className="w-4 h-4 text-indigo-500 shrink-0" />
               <span>
-                <strong>CaptureFlow Demo:</strong> Press{' '}
-                <kbd className="bg-white border border-indigo-200 px-1.5 py-0.5 rounded text-xs font-mono">
-                  Ctrl+F
-                </kbd>{' '}
-                or Right-Click anywhere to capture any section of this page into your AI workspace.
+                <strong>CaptureFlow Demo:</strong> Press <kbd className="bg-white border border-indigo-200 px-1.5 py-0.5 rounded text-xs font-mono">Ctrl+F</kbd> or Right-Click anywhere to capture any section of this page into your AI workspace.
               </span>
             </div>
 
@@ -1208,17 +1090,13 @@ export default function App() {
             <section className="mb-12">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">
-                    Capstone Projects
-                  </p>
-                  <h2 className="text-2xl font-black text-slate-900">
-                    Six systems. One ecosystem.
-                  </h2>
+                  <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">Capstone Projects</p>
+                  <h2 className="text-2xl font-black text-slate-900">Six systems. One ecosystem.</h2>
                 </div>
                 <span className="text-xs text-slate-400 font-medium">6 / 6 catalogued</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {LA_BUILDS_PROJECTS.map((project) => (
+                {LA_BUILDS_PROJECTS.map(project => (
                   <ProjectCard key={project.id} project={project} />
                 ))}
               </div>
@@ -1226,70 +1104,40 @@ export default function App() {
 
             {/* About */}
             <section className="mb-12 pt-10 border-t border-slate-100">
-              <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">
-                About
-              </p>
-              <h2 className="text-2xl font-black text-slate-900 mb-6">
-                First-principles engineering.
-                <br />
-                Applied to AI safety.
-              </h2>
+              <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">About</p>
+              <h2 className="text-2xl font-black text-slate-900 mb-6">First-principles engineering.<br />Applied to AI safety.</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
                   <p className="text-sm text-slate-600 leading-relaxed mb-4">
-                    <strong className="text-slate-900">Larry Arnold</strong> — independent AI
-                    researcher and developer, currently pursuing a B.S. in Computer Science with an
-                    Undergraduate Certificate in AI at Maryville University of St. Louis.
+                    <strong className="text-slate-900">Larry Arnold</strong> — independent AI researcher and developer, currently pursuing a B.S. in Computer Science with an Undergraduate Certificate in AI at Maryville University of St. Louis.
                   </p>
                   <p className="text-sm text-slate-600 leading-relaxed mb-4">
-                    Background in <strong className="text-slate-900">LLM red teaming</strong>,
-                    adversarial prompting, and AI safety research. Building the infrastructure layer
-                    for adversarial AI, cognitive automation, and system-level control.
+                    Background in <strong className="text-slate-900">LLM red teaming</strong>, adversarial prompting, and AI safety research. Building the infrastructure layer for adversarial AI, cognitive automation, and system-level control.
                   </p>
 
                   {/* Kitchen → Systems callout — restored */}
                   <div className="border-l-4 border-indigo-500 pl-4 py-1 my-5 bg-indigo-50 rounded-r-xl pr-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 mb-2">
-                      // The Kitchen → Systems Connection
-                    </p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 mb-2">// The Kitchen → Systems Connection</p>
                     <p className="text-sm text-slate-600 leading-relaxed">
-                      Before AI,{' '}
-                      <strong className="text-slate-800">
-                        17 years running high-volume professional kitchens
-                      </strong>{' '}
-                      — Sous Chef, Grill Master, Sushi Chef, Kitchen Manager. A kitchen at peak
-                      service is an adversarial distributed system:{' '}
-                      <strong className="text-slate-800">
-                        parallel execution under pressure, zero tolerance for cascading failures,
-                        real-time resource allocation, human coordination at the edge of chaos.
-                      </strong>{' '}
-                      That's the same problem class as multi-agent AI governance. The discipline
-                      transferred directly.
+                      Before AI, <strong className="text-slate-800">17 years running high-volume professional kitchens</strong> — Sous Chef, Grill Master, Sushi Chef, Kitchen Manager. A kitchen at peak service is an adversarial distributed system: <strong className="text-slate-800">parallel execution under pressure, zero tolerance for cascading failures, real-time resource allocation, human coordination at the edge of chaos.</strong> That's the same problem class as multi-agent AI governance. The discipline transferred directly.
                     </p>
                   </div>
 
                   <p className="text-sm text-slate-600 leading-relaxed">
-                    Approach: deconstruct systems to core components, rebuild through
-                    first-principles reasoning and pattern recognition.{' '}
-                    <strong className="text-slate-900">
-                      Engineering AI systems for failure-resistant operation.
-                    </strong>
+                    Approach: deconstruct systems to core components, rebuild through first-principles reasoning and pattern recognition. <strong className="text-slate-900">Engineering AI systems for failure-resistant operation.</strong>
                   </p>
                 </div>
                 <div className="space-y-2">
                   {[
-                    { icon: '🔴', name: 'LLM Red Teaming', sub: 'Adversarial · Safety' },
-                    { icon: '🤖', name: 'Multi-Agent Systems', sub: 'Architecture · Design' },
-                    { icon: '🧠', name: 'Cognitive Interfaces', sub: 'AI-Native · UX' },
-                    { icon: '🏛️', name: 'AI Governance', sub: 'Policy · Orchestration' },
-                    { icon: '⚛️', name: 'React / Full-Stack', sub: 'Vercel · Supabase' },
+                    { icon: '🔴', name: 'LLM Red Teaming',       sub: 'Adversarial · Safety' },
+                    { icon: '🤖', name: 'Multi-Agent Systems',    sub: 'Architecture · Design' },
+                    { icon: '🧠', name: 'Cognitive Interfaces',   sub: 'AI-Native · UX' },
+                    { icon: '🏛️', name: 'AI Governance',          sub: 'Policy · Orchestration' },
+                    { icon: '⚛️', name: 'React / Full-Stack',     sub: 'Vercel · Supabase' },
                     { icon: '🍳', name: 'Systems Under Pressure', sub: '17 yrs · Ops discipline' },
-                    { icon: '🎓', name: 'Maryville University', sub: 'CS + AI Certificate' },
-                  ].map((s) => (
-                    <div
-                      key={s.name}
-                      className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl"
-                    >
+                    { icon: '🎓', name: 'Maryville University',   sub: 'CS + AI Certificate' },
+                  ].map(s => (
+                    <div key={s.name} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
                       <span className="text-lg w-7 text-center">{s.icon}</span>
                       <span className="font-bold text-slate-900 text-sm flex-1">{s.name}</span>
                       <span className="text-xs text-slate-400 font-mono">{s.sub}</span>
@@ -1303,30 +1151,21 @@ export default function App() {
             <footer className="pt-8 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 flex-wrap gap-3">
               <span>© 2025 LA Builds · Larry Arnold · Independent AI Systems Engineering</span>
               <div className="flex items-center gap-4">
-                <a
-                  href="https://github.com/Arnoldlarry15"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 hover:text-slate-600 transition-colors"
-                >
+                <a href="https://github.com/Arnoldlarry15" target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 hover:text-slate-600 transition-colors">
                   <Github className="w-3.5 h-3.5" /> Arnoldlarry15
                 </a>
-                <a
-                  href="https://redset.app"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 hover:text-slate-600 transition-colors"
-                >
+                <a href="https://redset.app" target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 hover:text-slate-600 transition-colors">
                   <ExternalLink className="w-3 h-3" /> redset.app
                 </a>
-                <a
-                  href="mailto:labuilds@proton.me"
-                  className="flex items-center gap-1 hover:text-slate-600 transition-colors"
-                >
+                <a href="mailto:labuilds@proton.me"
+                  className="flex items-center gap-1 hover:text-slate-600 transition-colors">
                   labuilds@proton.me
                 </a>
               </div>
             </footer>
+
           </div>
         </MockBrowser>
       </main>
@@ -1340,22 +1179,14 @@ export default function App() {
         >
           <button
             className="w-full text-left px-4 py-2.5 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-3 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              setContextMenu({ show: false, x: 0, y: 0 });
-              setIsSelectingMode(true);
-            }}
+            onClick={(e) => { e.stopPropagation(); setContextMenu({ show: false, x: 0, y: 0 }); setIsSelectingMode(true); }}
           >
             <Scissors className="w-4 h-4" /> Capture Selection
           </button>
           <div className="h-px bg-slate-100 my-1" />
           <button
             className="w-full text-left px-4 py-2.5 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-3 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              setContextMenu({ show: false, x: 0, y: 0 });
-              setIsSidebarOpen(true);
-            }}
+            onClick={(e) => { e.stopPropagation(); setContextMenu({ show: false, x: 0, y: 0 }); setIsSidebarOpen(true); }}
           >
             <Library className="w-4 h-4" /> Open Workspace
           </button>
@@ -1377,9 +1208,9 @@ export default function App() {
             <div
               className="absolute border-2 border-blue-500 bg-blue-500/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.08)]"
               style={{
-                left: boxLeft - window.scrollX,
-                top: boxTop - window.scrollY,
-                width: boxWidth,
+                left:   boxLeft - window.scrollX,
+                top:    boxTop - window.scrollY,
+                width:  boxWidth,
                 height: boxHeight,
               }}
             />
@@ -1391,9 +1222,8 @@ export default function App() {
       )}
 
       {/* ── Workspace Sidebar ── */}
-      <div
-        className={`fixed inset-y-0 right-0 w-full sm:w-[500px] bg-slate-50 shadow-[-20px_0_40px_rgba(0,0,0,0.15)] z-[95] flex flex-col border-l border-slate-200 transform transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}
-      >
+      <div className={`fixed inset-y-0 right-0 w-full sm:w-[500px] bg-slate-50 shadow-[-20px_0_40px_rgba(0,0,0,0.15)] z-[95] flex flex-col border-l border-slate-200 transform transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+
         {/* Sidebar header */}
         <div className="p-4 border-b border-slate-200 bg-white flex flex-col gap-4 shrink-0">
           <div className="flex items-center justify-between">
@@ -1403,9 +1233,7 @@ export default function App() {
               </div>
               <div>
                 <h2 className="font-black text-base text-slate-900 leading-none">CaptureFlow</h2>
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Cognitive Intelligence Node
-                </p>
+                <p className="text-[10px] text-slate-400 font-medium">Cognitive Intelligence Node</p>
               </div>
             </div>
             <button
@@ -1420,10 +1248,10 @@ export default function App() {
           {/* Tabs */}
           <div className="flex bg-slate-100 p-1 rounded-lg">
             {[
-              { id: 'data', label: `Captures (${dataArtifacts.length})` },
+              { id: 'data',    label: `Captures (${dataArtifacts.length})` },
               { id: 'reports', label: 'Reports' },
-              { id: 'add', label: '+ Inject' },
-            ].map((tab) => (
+              { id: 'add',     label: '+ Inject' },
+            ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -1437,13 +1265,11 @@ export default function App() {
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
           {activeTab === 'data' && (
             <>
-              {localTasks.map((t) => (
-                <div
-                  key={t.id}
-                  className="bg-slate-100/50 rounded-2xl p-6 border border-slate-200 border-dashed flex flex-col items-center gap-3 animate-pulse"
-                >
+              {localTasks.map(t => (
+                <div key={t.id} className="bg-slate-100/50 rounded-2xl p-6 border border-slate-200 border-dashed flex flex-col items-center gap-3 animate-pulse">
                   <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
                   <p className="text-sm font-semibold text-slate-600 text-center">{t.message}</p>
                 </div>
@@ -1452,13 +1278,12 @@ export default function App() {
                 <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4 pt-16">
                   <Brain className="w-10 h-10 opacity-20" />
                   <p className="text-center text-sm px-8 leading-relaxed">
-                    No captures yet.
-                    <br />
+                    No captures yet.<br />
                     Close this panel and drag a region to begin.
                   </p>
                 </div>
               )}
-              {dataArtifacts.map((a) => (
+              {dataArtifacts.map(a => (
                 <ArtifactCard key={a.id} artifact={a} onDelete={() => handleDelete(a.id)} />
               ))}
             </>
@@ -1476,6 +1301,7 @@ export default function App() {
           {activeTab === 'add' && (
             <SourceUploader onInject={handleManualInject} setActiveTab={setActiveTab} />
           )}
+
         </div>
       </div>
     </div>
