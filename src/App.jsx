@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X, Check, Copy, Library, Sparkles, Loader2,
   Network, Menu, LayoutGrid, Scissors, FileText, Plus,
-  Headphones, Play, Pause, Trash2, Shield,
+  Trash2, Shield,
   Cpu, Brain, Zap, ExternalLink, Github
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
@@ -13,10 +13,6 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL    = import.meta.env.VITE_SUPABASE_URL    || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const GROQ_API_KEY    = import.meta.env.VITE_GROQ_API_KEY    || '';
-// Gemini kept for TTS only (no extraction usage)
-const GEMINI_API_KEY  = import.meta.env.VITE_GEMINI_API_KEY  || '';
-const GEMINI_BASE     = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 
 // Groq — free tier, fast inference, OpenAI-compatible API
 const GROQ_BASE  = 'https://api.groq.com/openai/v1';
@@ -26,63 +22,6 @@ const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 // SUPABASE CLIENT
 // ============================================================
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// ============================================================
-// AUDIO UTILITIES — PCM (Gemini TTS output) → WAV Blob URL
-// ============================================================
-const pcmBase64ToWavUrl = (base64) => {
-  const binary = atob(base64);
-  const pcmBytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) pcmBytes[i] = binary.charCodeAt(i);
-
-  const buffer = new ArrayBuffer(44 + pcmBytes.length);
-  const view = new DataView(buffer);
-  const writeStr = (offset, str) => {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-  };
-
-  // WAV header — 24kHz, 16-bit mono (Gemini TTS default)
-  writeStr(0, 'RIFF');
-  view.setUint32(4, 36 + pcmBytes.length, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true);       // chunk size
-  view.setUint16(20, 1, true);        // PCM format
-  view.setUint16(22, 1, true);        // mono
-  view.setUint32(24, 24000, true);    // sample rate
-  view.setUint32(28, 48000, true);    // byte rate (24000 * 2)
-  view.setUint16(32, 2, true);        // block align
-  view.setUint16(34, 16, true);       // bits per sample
-  writeStr(36, 'data');
-  view.setUint32(40, pcmBytes.length, true);
-  new Uint8Array(buffer, 44).set(pcmBytes);
-
-  return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
-};
-
-// ============================================================
-// API UTILITIES
-// ============================================================
-const fetchWithBackoff = async (url, options, retries = 3) => {
-  const delays = [1000, 2500, 5000];
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url, options);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        if (res.status === 400) throw new Error(err.error?.message || 'Bad Request to AI API.');
-        throw new Error(`HTTP ${res.status}: ${err.error?.message || 'Unknown error'}`);
-      }
-      return await res.json();
-    } catch (error) {
-      if (i === retries - 1 || error.message.includes('Bad Request')) throw error;
-      await new Promise(r => setTimeout(r, delays[i]));
-    }
-  }
-};
-
-const geminiUrl = (model, key) =>
-  `${GEMINI_BASE}/models/${model}:generateContent?key=${key}`;
 
 const callGroq = async (prompt, { temperature = 0.3, maxTokens = 2048 } = {}) => {
   if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
@@ -221,7 +160,7 @@ const REPORT_PROMPTS = {
   summary:      'Write a comprehensive Executive Summary synthesizing all these artifacts. Connect the dots, surface key themes, and provide actionable insights.',
   graph:        'Create a structured Knowledge Graph of these artifacts. List entity relationships clearly using: [Entity A] --(relationship)--> [Entity B]. Group by domain.',
   slides:       'Convert these artifacts into a Slide Deck Outline. For each slide include: a punchy title, 3–5 bullet points, and a speaker note.',
-  audio_script: 'Write an engaging, conversational solo-podcast briefing summarizing this data. Speak directly to the listener. Make it flow naturally, around 200 words. No stage directions.',
+  action_plan:  'Create a concise Action Plan from these artifacts. Include a prioritized checklist, likely next steps, risks, and recommended owners or roles when inferable.',
 };
 
 const generateReport = async (artifacts, reportType) => {
@@ -229,32 +168,6 @@ const generateReport = async (artifacts, reportType) => {
   const prompt = `${REPORT_PROMPTS[reportType]}\n\nSource Data:\n${data}`;
 
   return callGroq(prompt, { temperature: 0.4, maxTokens: 2048 }) || 'Generation failed.';
-};
-
-// ============================================================
-// AI — TEXT TO SPEECH
-// ============================================================
-const generateTTSAudio = async (text) => {
-  if (!GEMINI_API_KEY) throw new Error('Missing VITE_GEMINI_API_KEY in environment.');
-
-  const result = await fetchWithBackoff(
-    geminiUrl(GEMINI_TTS_MODEL, GEMINI_API_KEY),
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: `Read the following briefing naturally and professionally:\n\n${text}` }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } },
-        },
-      }),
-    }
-  );
-
-  const base64PCM = result.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!base64PCM) throw new Error('TTS generation returned no audio data.');
-  return pcmBase64ToWavUrl(base64PCM);
 };
 
 // ============================================================
@@ -508,144 +421,6 @@ function ArtifactCard({ artifact, onDelete }) {
 }
 
 // ============================================================
-// AUDIO REPORT CARD — real progress bar wired to HTMLAudioElement
-// ============================================================
-function AudioReportCard({ report, onDelete }) {
-  const [isPlaying, setIsPlaying]       = useState(false);
-  const [isLoading, setIsLoading]       = useState(false);
-  const [progress, setProgress]         = useState(0);
-  const [duration, setDuration]         = useState(0);
-  const [audioUrl, setAudioUrl]         = useState(null);
-  const audioRef                        = useRef(null);
-
-  // Cleanup blob URL on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-    };
-  }, [audioUrl]);
-
-  const togglePlay = async () => {
-    // If audio already loaded — just toggle play/pause
-    if (audioRef.current && audioUrl) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current.play();
-        setIsPlaying(true);
-      }
-      return;
-    }
-
-    // First play — generate TTS audio
-    setIsLoading(true);
-    try {
-      const url = await generateTTSAudio(report.content);
-      setAudioUrl(url);
-
-      const audio = new Audio(url);
-      audioRef.current = audio;
-
-      // Wire real playback events
-      audio.addEventListener('timeupdate', () => {
-        if (audio.duration) setProgress((audio.currentTime / audio.duration) * 100);
-      });
-      audio.addEventListener('loadedmetadata', () => setDuration(audio.duration));
-      audio.addEventListener('ended', () => {
-        setIsPlaying(false);
-        setProgress(0);
-      });
-      audio.addEventListener('error', () => {
-        setIsPlaying(false);
-        setIsLoading(false);
-      });
-
-      await audio.play();
-      setIsPlaying(true);
-    } catch (err) {
-      console.error('TTS error:', err);
-      alert('Audio generation failed. Check your Gemini API key and TTS quota.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSeek = (e) => {
-    if (!audioRef.current || !duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    audioRef.current.currentTime = ratio * duration;
-    setProgress(ratio * 100);
-  };
-
-  const formatTime = (secs) => {
-    if (!secs || isNaN(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
-  return (
-    <div className="bg-slate-900 rounded-2xl p-5 shadow-lg border border-slate-800 text-white">
-      <div className="flex justify-between items-start mb-4">
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border bg-indigo-900/50 text-indigo-300 border-indigo-800 flex items-center gap-1">
-          <Headphones className="w-3 h-3" /> Audio Briefing
-        </span>
-        <button onClick={onDelete} className="text-slate-500 hover:text-red-400 transition-colors p-1">
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-
-      <h3 className="font-extrabold text-lg mb-4 leading-tight">{report.title}</h3>
-
-      <div className="bg-slate-800 rounded-xl p-4 space-y-3">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={togglePlay}
-            disabled={isLoading}
-            className="w-12 h-12 bg-indigo-500 hover:bg-indigo-400 rounded-full flex items-center justify-center transition-colors shrink-0 disabled:opacity-50"
-          >
-            {isLoading
-              ? <Loader2 className="w-5 h-5 animate-spin" />
-              : isPlaying
-                ? <Pause className="w-5 h-5 fill-white" />
-                : <Play className="w-5 h-5 fill-white ml-0.5" />
-            }
-          </button>
-
-          <div className="flex-1 space-y-1">
-            {/* Real seekable progress bar */}
-            <div
-              className="h-2 bg-slate-700 rounded-full overflow-hidden cursor-pointer"
-              onClick={handleSeek}
-            >
-              <div
-                className="h-full bg-indigo-400 rounded-full transition-none"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-              <span>{formatTime(audioRef.current?.currentTime)}</span>
-              <span>{duration ? formatTime(duration) : (audioUrl ? '...' : 'Click play to generate')}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <details className="mt-4 text-xs text-slate-400 cursor-pointer">
-        <summary className="hover:text-slate-300 select-none">Show Transcript</summary>
-        <p className="mt-2 leading-relaxed bg-slate-800/50 p-3 rounded-lg">{report.content}</p>
-      </details>
-    </div>
-  );
-}
-
-// ============================================================
 // SOURCE UPLOADER TAB
 // ============================================================
 function SourceUploader({ onInject, setActiveTab }) {
@@ -695,7 +470,7 @@ const REPORT_TYPES = [
   { key: 'summary',      label: 'Exec Summary',    Icon: FileText,    dark: false },
   { key: 'graph',        label: 'Knowledge Graph', Icon: Network,     dark: false },
   { key: 'slides',       label: 'Slide Deck',      Icon: LayoutGrid,  dark: false },
-  { key: 'audio_script', label: 'Audio Briefing',  Icon: Headphones,  dark: true  },
+  { key: 'action_plan',  label: 'Action Plan',     Icon: FileText,    dark: true  },
 ];
 
 function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onDelete }) {
@@ -751,13 +526,11 @@ function ReportGenerator({ dataArtifacts, reportArtifacts, onGenerateReport, onD
       )}
 
       {reportArtifacts.length === 0 && !isGenerating && (
-        <p className="text-center text-xs text-slate-400 mt-8">No reports generated yet.</p>
+        <p className="text-center text-xs text-slate-400 mt-8">No synthesis generated yet.</p>
       )}
 
       {reportArtifacts.map(report =>
-        report.type === 'audio'
-          ? <AudioReportCard key={report.id} report={report} onDelete={() => onDelete(report.id)} />
-          : <ArtifactCard    key={report.id} artifact={report} onDelete={() => onDelete(report.id)} />
+        <ArtifactCard key={report.id} artifact={report} onDelete={() => onDelete(report.id)} />
       )}
     </div>
   );
@@ -1004,14 +777,14 @@ export default function App() {
         summary:      'Executive Summary',
         graph:        'Knowledge Graph',
         slides:       'Slide Outline',
-        audio_script: 'Podcast Script',
+        action_plan:  'Action Plan',
       };
       await db.saveArtifact({
         title:    categoryMap[type],
         category: 'Generated Report',
         content:  text,
         tags:     [type, 'synthesis'],
-        type:     type === 'audio_script' ? 'audio' : 'report',
+        type:     'report',
       });
     } catch (err) {
       console.error('Report generation error:', err);
@@ -1285,7 +1058,7 @@ export default function App() {
           <div className="flex bg-slate-100 p-1 rounded-lg">
             {[
               { id: 'data',    label: `Captures (${dataArtifacts.length})` },
-              { id: 'reports', label: 'Reports' },
+              { id: 'reports', label: 'Synthesis' },
               { id: 'add',     label: '+ Inject' },
             ].map(tab => (
               <button
