@@ -189,34 +189,6 @@ const extractKnowledge = async (base64Image = null, textContext = null) => {
   }
 };
 
-  const result = await fetchWithBackoff(
-    geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-  );
-
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Invalid AI response format.');
-
-  try {
-    const raw = text.trim();
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    const parsed = JSON.parse(raw.substring(start, end + 1));
-    if (parsed.artifacts?.length) return parsed.artifacts;
-    throw new Error('Empty artifacts array');
-  } catch (err) {
-  console.warn('Gemini failed, using offline fallback:', err);
-
-  return [{
-    title: base64Image ? 'Captured Region (Offline Mode)' : 'Text Capture (Offline Mode)',
-    category: 'Unstructured Capture',
-    content: textContext
-      ? textContext.slice(0, 2000)
-      : 'Visual capture stored locally. AI service unavailable or quota exceeded.',
-    tags: ['offline', 'fallback']
-  }];
-}
-};
 
 // ============================================================
 // AI — REPORT GENERATION
