@@ -20,7 +20,7 @@ const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 
 // Groq — free tier, fast inference, OpenAI-compatible API
 const GROQ_BASE  = 'https://api.groq.com/openai/v1';
-const GROQ_MODEL = 'llama-3.1-70b-versatile';
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 
 // ============================================================
 // SUPABASE CLIENT
@@ -87,42 +87,70 @@ const geminiUrl = (model, key) =>
 const callGroq = async (prompt, { temperature = 0.3, maxTokens = 2048 } = {}) => {
   if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
 
-  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      temperature,
-      max_tokens: maxTokens,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  let lastError = null;
 
-  if (!res.ok) {
+  for (const model of GROQ_MODELS) {
+    const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature,
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || '';
+    }
+
     const errText = await res.text().catch(() => '');
-    throw new Error(errText || `Groq API error ${res.status}`);
+    lastError = new Error(errText || `Groq API error ${res.status}`);
+    const body = errText.toLowerCase();
+
+    if (!body.includes('model_decommissioned') && !body.includes('not supported') && !body.includes('model') ) {
+      break;
+    }
   }
 
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
+  throw lastError || new Error('Groq API request failed.');
 };
 
 const extractTextFromCanvas = async (canvas) => {
   try {
+    // If Tesseract has been loaded on the page, use it for better OCR results.
+    // Wait briefly for the script to initialize if it's being loaded dynamically.
+    let attempts = 0;
+    while (!window.Tesseract && attempts < 15) {
+      await new Promise(r => setTimeout(r, 150));
+      attempts++;
+    }
+
+    if (window.Tesseract && typeof window.Tesseract.recognize === 'function') {
+      try {
+        const result = await window.Tesseract.recognize(canvas, 'eng');
+        const text = result?.data?.text?.trim();
+        if (text && text.length > 5) return `OCR result:\n${text}`;
+      } catch (e) {
+        // fall through to heuristic
+      }
+    }
+
+    // Fallback heuristic: cheap visual density check to indicate presence of text
     const ctx = canvas.getContext('2d');
     if (!ctx) return 'Captured region (unprocessed visual).';
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
     let pixelCount = 0;
     for (let i = 0; i < imageData.data.length; i += 4) {
       const r = imageData.data[i];
       const g = imageData.data[i + 1];
       const b = imageData.data[i + 2];
-
       if (r + g + b < 700) pixelCount++;
     }
 
@@ -788,7 +816,19 @@ export default function App() {
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     script.onload = () => setIsCanvasReady(true);
     document.body.appendChild(script);
-    return () => { if (document.body.contains(script)) document.body.removeChild(script); };
+
+    // Also try to load Tesseract.js as an optional client-side OCR fallback
+    if (!window.Tesseract) {
+      const tScript = document.createElement('script');
+      tScript.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js';
+      tScript.async = true;
+      document.body.appendChild(tScript);
+    }
+
+    return () => {
+      if (document.body.contains(script)) document.body.removeChild(script);
+      // keep tesseract script; removing could break cached worker state — no-op cleanup
+    };
   }, []);
 
   // ── 4. Global hotkeys + context menu dismiss ─────────────────

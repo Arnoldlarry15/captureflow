@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:groq": "node scripts/test-groq.js",
     "preview": "vite preview",
     "lint": "eslint \"src/**/*.jsx\"",
     "lint:strict": "eslint \"src/**/*.jsx\" --max-warnings=0",
