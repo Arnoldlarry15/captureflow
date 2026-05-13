@@ -84,42 +84,110 @@ const geminiUrl = (model, key) =>
 // AI — KNOWLEDGE EXTRACTION
 // ============================================================
 const extractKnowledge = async (base64Image = null, textContext = null) => {
-  if (!GEMINI_API_KEY) throw new Error('Missing VITE_GEMINI_API_KEY in environment.');
+  try {
+    if (!GEMINI_API_KEY) {
+      throw new Error('Missing Gemini API key.');
+    }
 
-  const parts = base64Image
-    ? [
-        { text: 'Analyze the exact contents of this visual selection. Extract all relevant information into distinct, highly structured knowledge artifacts. Do not invent information.' },
-        { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-      ]
-    : [
-        { text: `Analyze the following manually uploaded text source. Extract the core concepts into highly structured knowledge artifacts.\n\n${textContext}` },
-      ];
+    const parts = base64Image
+      ? [
+          {
+            text: 'Analyze the exact contents of this visual selection. Extract all relevant information into distinct, highly structured knowledge artifacts. Do not invent information.'
+          },
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: base64Image
+            }
+          },
+        ]
+      : [
+          {
+            text: `Analyze the following manually uploaded text source. Extract the core concepts into highly structured knowledge artifacts.\n\n${textContext}`
+          },
+        ];
 
-  const payload = {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: 'OBJECT',
-        properties: {
-          artifacts: {
-            type: 'ARRAY',
-            items: {
-              type: 'OBJECT',
-              properties: {
-                title:    { type: 'STRING' },
-                category: { type: 'STRING' },
-                content:  { type: 'STRING' },
-                tags:     { type: 'ARRAY', items: { type: 'STRING' } },
+    const payload = {
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            artifacts: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  title: { type: 'STRING' },
+                  category: { type: 'STRING' },
+                  content: { type: 'STRING' },
+                  tags: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' },
+                  },
+                },
+                required: ['title', 'category', 'content', 'tags'],
               },
-              required: ['title', 'category', 'content', 'tags'],
             },
           },
         },
       },
-    },
-  };
+    };
+
+    console.log('Calling Gemini API...');
+
+    const result = await fetchWithBackoff(
+      geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    console.log('Gemini response received');
+
+    const text =
+      result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      throw new Error('Invalid AI response format.');
+    }
+
+    const raw = text.trim();
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+
+    const parsed = JSON.parse(raw.substring(start, end + 1));
+
+    if (parsed.artifacts?.length) {
+      return parsed.artifacts;
+    }
+
+    throw new Error('Empty artifacts array');
+
+  } catch (err) {
+    console.warn('AI extraction failed. Using offline fallback.', err);
+
+    return [{
+      title: base64Image
+        ? 'Captured Region (Offline Mode)'
+        : 'Text Capture (Offline Mode)',
+
+      category: 'Offline Capture',
+
+      content: textContext
+        ? textContext.slice(0, 2000)
+        : 'Visual region captured successfully, but AI processing is currently unavailable.',
+
+      tags: ['offline', 'fallback']
+    }];
+  }
+};
 
   const result = await fetchWithBackoff(
     geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
