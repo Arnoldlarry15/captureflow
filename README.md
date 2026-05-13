@@ -1,10 +1,13 @@
 # CaptureFlow
 
-### AI-Native Cognitive Infrastructure
+## AI-Native Cognitive Infrastructure
 
 > Drag. Release. Your AI memory handles the rest.
 
-CaptureFlow reduces the friction between thought and structured memory. Draw a selection box over any region of any page — CaptureFlow screenshots it, sends it to Gemini Vision for structured extraction, and persists the resulting knowledge artifacts to Supabase in real time.
+CaptureFlow reduces the friction between thought and structured memory.
+Draw a selection box over any region of any page — CaptureFlow screenshots
+it, sends it to Gemini Vision for structured extraction, and persists the
+resulting knowledge artifacts to Supabase in real time.
 
 ---
 
@@ -12,7 +15,7 @@ CaptureFlow reduces the friction between thought and structured memory. Draw a s
 
 - **React 18** + Vite
 - **Tailwind CSS**
-- **Gemini 2.5 Flash** — vision extraction, report generation
+- **Groq (Llama 3.3 70B)** — extraction, report generation
 - **Gemini TTS** — audio briefing synthesis
 - **Supabase** — Postgres + Realtime sync
 
@@ -27,9 +30,9 @@ node -v   # needs v18+
 npm -v
 ```
 
-If not installed → https://nodejs.org (grab LTS)
+If not installed -> <https://nodejs.org> (grab LTS)
 
-### 2. Clone / download this folder, then:
+### 2. Clone / download this folder, then
 
 ```bash
 cd captureflow
@@ -50,6 +53,7 @@ If you ever need to reset it, copy `.env.example` → `.env` and fill in:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_GEMINI_API_KEY`
+- `VITE_GROQ_API_KEY`
 
 ### 5. Run it
 
@@ -57,7 +61,7 @@ If you ever need to reset it, copy `.env.example` → `.env` and fill in:
 npm run dev
 ```
 
-Opens at http://localhost:3000
+Opens at <http://localhost:3000>
 
 ---
 
@@ -67,7 +71,8 @@ Opens at http://localhost:3000
 - Drag a box over any content on the page
 - Release — Gemini extracts structured knowledge artifacts automatically
 - Open the sidebar (hamburger or bottom-left button) to view captures
-- Use **Reports** tab to generate summaries, knowledge graphs, slide outlines, or audio briefings
+- Use **Reports** tab to generate summaries, knowledge graphs,
+  slide outlines, or audio briefings
 - Use **+ Inject** tab to paste raw text for AI structuring
 
 ---
@@ -82,7 +87,9 @@ vercel
 ```
 
 When prompted, add your environment variables in the Vercel dashboard:
-Settings → Environment Variables → add VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_GEMINI_API_KEY
+Settings → Environment Variables → add:
+VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
+VITE_GEMINI_API_KEY, VITE_GROQ_API_KEY
 
 ### Option B — GitHub
 
@@ -104,7 +111,7 @@ Settings → Environment Variables → add VITE_SUPABASE_URL, VITE_SUPABASE_ANON
 
 ## Project Structure
 
-```
+```text
 captureflow/
 ├── index.html              # Vite entry point
 ├── package.json

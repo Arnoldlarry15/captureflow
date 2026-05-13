@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  X, Check, Copy, Library, Sparkles, Loader2, AlertCircle,
+  X, Check, Copy, Library, Sparkles, Loader2,
   Network, Menu, LayoutGrid, Scissors, FileText, Plus,
-  Headphones, Play, Pause, Trash2, Database, Shield,
-  Cpu, Brain, Zap, ExternalLink, Github, ChevronRight
+  Headphones, Play, Pause, Trash2, Shield,
+  Cpu, Brain, Zap, ExternalLink, Github
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -114,11 +114,11 @@ Return ONLY valid JSON in this exact format, no markdown, no explanation:
   ]
 }`;
 
-    const res = await fetch(\`\${GROQ_BASE}/chat/completions\`, {
+    const res = await fetch(`${GROQ_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': \`Bearer \${GROQ_API_KEY}\`,
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
       },
       body: JSON.stringify({
         model: GROQ_MODEL,
@@ -133,7 +133,7 @@ Return ONLY valid JSON in this exact format, no markdown, no explanation:
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(\`Groq API error \${res.status}: \${err.error?.message || 'unknown'}\`);
+      throw new Error(`Groq API error ${res.status}: ${err.error?.message || 'unknown'}`);
     }
 
     const data   = await res.json();
@@ -893,8 +893,6 @@ export default function App() {
       const scrollX = window.scrollX || window.pageXOffset;
       const scrollY = window.scrollY || window.pageYOffset;
 
-      console.log('[CaptureFlow] capture:', { left, top, width, height, scrollX, scrollY });
-
       // Scroll was frozen during drag so scrollX/scrollY = scroll at drag-start.
       // viewport coord + scroll = document coord — correct for html2canvas(document.body).
       const canvas = await window.html2canvas(document.body, {
@@ -907,10 +905,7 @@ export default function App() {
         backgroundColor: null,
       });
 
-      console.log('[CaptureFlow] canvas:', canvas.width, 'x', canvas.height);
-
       const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-      console.log('[CaptureFlow] base64 length:', base64?.length, '— firing pipeline');
       await ingestArtifacts(base64, null, taskId);
     } catch (err) {
       console.error('[CaptureFlow] Capture error:', err);
@@ -921,11 +916,7 @@ export default function App() {
   // Shared ingestion used by both capture and manual upload
   const ingestArtifacts = useCallback(async (base64Image, textContext, taskId) => {
     try {
-      console.log('Starting Gemini extraction...');
-
       const extracted = await extractKnowledge(base64Image, textContext);
-
-      console.log('Gemini extraction complete:', extracted);
 
       // Bug fix: use Promise.all instead of forEach to properly await all writes
       await Promise.all(
