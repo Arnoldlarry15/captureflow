@@ -20,7 +20,7 @@ const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 
 // Groq — free tier, fast inference, OpenAI-compatible API
 const GROQ_BASE  = 'https://api.groq.com/openai/v1';
-const GROQ_MODEL = 'llama-3.3-70b-versatile'; // best free Groq model for structured extraction
+const GROQ_MODEL = 'llama-3.1-70b-versatile';
 
 // ============================================================
 // SUPABASE CLIENT
@@ -84,6 +84,58 @@ const fetchWithBackoff = async (url, options, retries = 3) => {
 const geminiUrl = (model, key) =>
   `${GEMINI_BASE}/models/${model}:generateContent?key=${key}`;
 
+const callGroq = async (prompt, { temperature = 0.3, maxTokens = 2048 } = {}) => {
+  if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
+
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      temperature,
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(errText || `Groq API error ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+};
+
+const extractTextFromCanvas = async (canvas) => {
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return 'Captured region (unprocessed visual).';
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    let pixelCount = 0;
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const r = imageData.data[i];
+      const g = imageData.data[i + 1];
+      const b = imageData.data[i + 2];
+
+      if (r + g + b < 700) pixelCount++;
+    }
+
+    if (pixelCount > 1000) {
+      return 'Captured visual content contains structured UI/text regions (AI enrichment pending).';
+    }
+
+    return 'Captured visual content (low-text density region).';
+  } catch {
+    return 'Captured region (unprocessed visual).';
+  }
+};
+
 // ============================================================
 // AI — KNOWLEDGE EXTRACTION  (Groq, free tier)
 // ============================================================
@@ -93,8 +145,6 @@ const geminiUrl = (model, key) =>
 // stored; the AI extracts structure from a content description prompt.
 const extractKnowledge = async (base64Image = null, textContext = null) => {
   try {
-    if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
-
     const userContent = base64Image
       ? 'A screenshot has been captured from the page. Analyze what is likely in a typical web page screenshot and extract all visible information into structured knowledge artifacts. Focus on text content, headings, key concepts, and data visible in the capture.'
       : `Analyze the following text source. Extract the core concepts into highly structured knowledge artifacts.
@@ -113,31 +163,7 @@ Return ONLY valid JSON in this exact format, no markdown, no explanation:
     }
   ]
 }`;
-
-    const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        temperature: 0.1,
-        max_tokens: 2048,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userContent  },
-        ],
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(`Groq API error ${res.status}: ${err.error?.message || 'unknown'}`);
-    }
-
-    const data   = await res.json();
-    const text   = data.choices?.[0]?.message?.content || '';
+    const text = await callGroq(`${systemPrompt}\n\n${userContent}`, { temperature: 0.1, maxTokens: 2048 });
     const start  = text.indexOf('{');
     const end    = text.lastIndexOf('}');
     if (start === -1 || end === -1) throw new Error('No JSON in Groq response');
@@ -171,32 +197,10 @@ const REPORT_PROMPTS = {
 };
 
 const generateReport = async (artifacts, reportType) => {
-  if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
-
   const data   = artifacts.map(a => `- ${a.title}: ${a.content}`).join('\n');
   const prompt = `${REPORT_PROMPTS[reportType]}\n\nSource Data:\n${data}`;
 
-  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      temperature: 0.4,
-      max_tokens: 2048,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Groq report error ${res.status}: ${err.error?.message || 'unknown'}`);
-  }
-
-  const data2 = await res.json();
-  return data2.choices?.[0]?.message?.content || 'Generation failed.';
+  return callGroq(prompt, { temperature: 0.4, maxTokens: 2048 }) || 'Generation failed.';
 };
 
 // ============================================================
@@ -906,7 +910,8 @@ export default function App() {
       });
 
       const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-      await ingestArtifacts(base64, null, taskId);
+      const fallbackText = await extractTextFromCanvas(canvas);
+      await ingestArtifacts(base64, fallbackText, taskId);
     } catch (err) {
       console.error('[CaptureFlow] Capture error:', err);
       setLocalTasks(prev => prev.filter(t => t.id !== taskId));
