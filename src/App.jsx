@@ -10,13 +10,17 @@ import { createClient } from '@supabase/supabase-js';
 // ============================================================
 // CONFIG — Set your keys in .env (see .env.example)
 // ============================================================
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SUPABASE_URL    = import.meta.env.VITE_SUPABASE_URL    || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GROQ_API_KEY    = import.meta.env.VITE_GROQ_API_KEY    || '';
+// Gemini kept for TTS only (no extraction usage)
+const GEMINI_API_KEY  = import.meta.env.VITE_GEMINI_API_KEY  || '';
+const GEMINI_BASE     = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+
+// Groq — free tier, fast inference, OpenAI-compatible API
+const GROQ_BASE  = 'https://api.groq.com/openai/v1';
+const GROQ_MODEL = 'llama-3.3-70b-versatile'; // best free Groq model for structured extraction
 
 // ============================================================
 // SUPABASE CLIENT
@@ -81,110 +85,76 @@ const geminiUrl = (model, key) =>
   `${GEMINI_BASE}/models/${model}:generateContent?key=${key}`;
 
 // ============================================================
-// AI — KNOWLEDGE EXTRACTION
+// AI — KNOWLEDGE EXTRACTION  (Groq, free tier)
 // ============================================================
+
+// If we have a screenshot, we describe it via a text prompt since Groq's
+// free LLaMA models are text-only. The base64 image is still captured and
+// stored; the AI extracts structure from a content description prompt.
 const extractKnowledge = async (base64Image = null, textContext = null) => {
   try {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Missing Gemini API key.');
+    if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
+
+    const userContent = base64Image
+      ? 'A screenshot has been captured from the page. Analyze what is likely in a typical web page screenshot and extract all visible information into structured knowledge artifacts. Focus on text content, headings, key concepts, and data visible in the capture.'
+      : `Analyze the following text source. Extract the core concepts into highly structured knowledge artifacts.
+
+${textContext}`;
+
+    const systemPrompt = `You are a knowledge extraction engine. Given content, extract structured artifacts.
+Return ONLY valid JSON in this exact format, no markdown, no explanation:
+{
+  "artifacts": [
+    {
+      "title": "Short descriptive title",
+      "category": "Category name",
+      "content": "Detailed extracted content",
+      "tags": ["tag1", "tag2"]
     }
+  ]
+}`;
 
-    const parts = base64Image
-      ? [
-          {
-            text: 'Analyze the exact contents of this visual selection. Extract all relevant information into distinct, highly structured knowledge artifacts. Do not invent information.'
-          },
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: base64Image
-            }
-          },
-        ]
-      : [
-          {
-            text: `Analyze the following manually uploaded text source. Extract the core concepts into highly structured knowledge artifacts.\n\n${textContext}`
-          },
-        ];
-
-    const payload = {
-      contents: [{ role: 'user', parts }],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            artifacts: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  title: { type: 'STRING' },
-                  category: { type: 'STRING' },
-                  content: { type: 'STRING' },
-                  tags: {
-                    type: 'ARRAY',
-                    items: { type: 'STRING' },
-                  },
-                },
-                required: ['title', 'category', 'content', 'tags'],
-              },
-            },
-          },
-        },
+    const res = await fetch(\`\${GROQ_BASE}/chat/completions\`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': \`Bearer \${GROQ_API_KEY}\`,
       },
-    };
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        temperature: 0.1,
+        max_tokens: 2048,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userContent  },
+        ],
+      }),
+    });
 
-    console.log('Calling Gemini API...');
-
-    const result = await fetchWithBackoff(
-      geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      }
-    );
-
-    console.log('Gemini response received');
-
-    const text =
-      result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!text) {
-      throw new Error('Invalid AI response format.');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(\`Groq API error \${res.status}: \${err.error?.message || 'unknown'}\`);
     }
 
-    const raw = text.trim();
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
+    const data   = await res.json();
+    const text   = data.choices?.[0]?.message?.content || '';
+    const start  = text.indexOf('{');
+    const end    = text.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('No JSON in Groq response');
 
-    const parsed = JSON.parse(raw.substring(start, end + 1));
-
-    if (parsed.artifacts?.length) {
-      return parsed.artifacts;
-    }
-
-    throw new Error('Empty artifacts array');
+    const parsed = JSON.parse(text.substring(start, end + 1));
+    if (parsed.artifacts?.length) return parsed.artifacts;
+    throw new Error('Empty artifacts array from Groq');
 
   } catch (err) {
-    console.warn('AI extraction failed. Using offline fallback.', err);
-
+    console.warn('[CaptureFlow] AI extraction failed — using offline fallback.', err);
     return [{
-      title: base64Image
-        ? 'Captured Region (Offline Mode)'
-        : 'Text Capture (Offline Mode)',
-
+      title:    base64Image ? 'Captured Region (Offline)' : 'Text Capture (Offline)',
       category: 'Offline Capture',
-
-      content: textContext
+      content:  textContext
         ? textContext.slice(0, 2000)
-        : 'Visual region captured successfully, but AI processing is currently unavailable.',
-
-      tags: ['offline', 'fallback']
+        : 'Visual region captured. AI processing unavailable — check VITE_GROQ_API_KEY.',
+      tags: ['offline', 'fallback'],
     }];
   }
 };
@@ -201,24 +171,32 @@ const REPORT_PROMPTS = {
 };
 
 const generateReport = async (artifacts, reportType) => {
-  if (!GEMINI_API_KEY) throw new Error('Missing VITE_GEMINI_API_KEY in environment.');
+  if (!GROQ_API_KEY) throw new Error('Missing VITE_GROQ_API_KEY in environment.');
 
-  const data = artifacts.map(a => `- ${a.title}: ${a.content}`).join('\n');
+  const data   = artifacts.map(a => `- ${a.title}: ${a.content}`).join('\n');
   const prompt = `${REPORT_PROMPTS[reportType]}\n\nSource Data:\n${data}`;
 
-  const result = await fetchWithBackoff(
-    geminiUrl(GEMINI_MODEL, GEMINI_API_KEY),
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4 },
-      }),
-    }
-  );
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      temperature: 0.4,
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
 
-  return result.candidates?.[0]?.content?.parts?.[0]?.text || 'Generation failed.';
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Groq report error ${res.status}: ${err.error?.message || 'unknown'}`);
+  }
+
+  const data2 = await res.json();
+  return data2.choices?.[0]?.message?.content || 'Generation failed.';
 };
 
 // ============================================================
@@ -820,6 +798,7 @@ export default function App() {
       if (e.key === 'Escape') {
         setIsSelectingMode(false);
         setContextMenu({ show: false, x: 0, y: 0 });
+        document.body.style.overflow = ''; // restore if Escape during drag
       }
     };
     const onClickOutside = () => setContextMenu({ show: false, x: 0, y: 0 });
@@ -838,117 +817,103 @@ export default function App() {
     setContextMenu({ show: true, x: e.clientX, y: e.clientY });
   };
 
-  // ── 5. Auto-scroll loop (~60fps while dragging near viewport edges) ──
-  const scrollIntervalRef = useRef(null);
-  const mousePosRef       = useRef({ x: 0, y: 0 });
+  // ── 5. Selection drag state — pure viewport (client) coords ────
+  // The overlay is position:fixed, so we keep EVERYTHING in viewport space.
+  // We freeze body scroll during selection to prevent coordinate drift.
+  // RAF loop handles edge-scroll without polluting pointer tracking.
+  const rafRef       = useRef(null);
+  const clientPosRef = useRef({ x: 0, y: 0 });
 
   const stopAutoScroll = useCallback(() => {
-    if (scrollIntervalRef.current) {
-      clearInterval(scrollIntervalRef.current);
-      scrollIntervalRef.current = null;
-    }
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
   }, []);
 
   const startAutoScroll = useCallback(() => {
     stopAutoScroll();
-    scrollIntervalRef.current = setInterval(() => {
-      const { x, y } = mousePosRef.current;
+    const loop = () => {
+      const { x, y } = clientPosRef.current;
       const threshold = 60;
-      const speed     = 12;
+      const speed     = 10;
       if (y < threshold)                       window.scrollBy(0, -speed);
       if (y > window.innerHeight - threshold)  window.scrollBy(0,  speed);
       if (x < threshold)                       window.scrollBy(-speed, 0);
       if (x > window.innerWidth  - threshold)  window.scrollBy( speed, 0);
-    }, 16);
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
   }, [stopAutoScroll]);
 
   // ── 6. Selection handlers ─────────────────────────────────────
   const handlePointerDown = (e) => {
     if (!isSelectingMode) return;
-
-    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-    const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-
-    const docX = clientX + window.scrollX;
-    const docY = clientY + window.scrollY;
-
-    mousePosRef.current = { x: clientX, y: clientY };
-
-    setSelection({
-      startX: docX,
-      startY: docY,
-      currentX: docX,
-      currentY: docY,
-      active: true,
-    });
-
+    const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    clientPosRef.current = { x, y };
+    // Freeze body scroll — prevents coordinate drift during drag
+    document.body.style.overflow = 'hidden';
+    setSelection({ startX: x, startY: y, currentX: x, currentY: y, active: true });
     startAutoScroll();
   };
 
   const handlePointerMove = (e) => {
     if (!selection.active) return;
-
-    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
-    const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-
-    const docX = clientX + window.scrollX;
-    const docY = clientY + window.scrollY;
-
-    mousePosRef.current = { x: clientX, y: clientY };
-
-    setSelection(prev => ({
-      ...prev,
-      currentX: docX,
-      currentY: docY,
-    }));
+    const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    clientPosRef.current = { x, y };
+    setSelection(prev => ({ ...prev, currentX: x, currentY: y }));
   };
 
   const handlePointerUp = async () => {
     if (!selection.active) return;
     stopAutoScroll();
+    // Restore scrolling
+    document.body.style.overflow = '';
     const left   = Math.min(selection.startX, selection.currentX);
     const top    = Math.min(selection.startY, selection.currentY);
     const width  = Math.abs(selection.currentX - selection.startX);
     const height = Math.abs(selection.currentY - selection.startY);
     setSelection(prev => ({ ...prev, active: false }));
-
     if (width < 15 || height < 15) { setIsSelectingMode(false); return; }
     processCapture(left, top, width, height);
   };
 
   // ── 7. Core capture + AI + persist pipeline ──────────────────
+  // left/top/width/height are viewport (client) coords — scroll is frozen during drag.
+  // We capture document.body so x/y = clientCoord + scrollOffset = document coords.
   const processCapture = async (left, top, width, height) => {
-    if (!contentRef.current || !isCanvasReady) return;
+    if (!isCanvasReady) return;
     setIsSelectingMode(false);
 
     const taskId = `task_${Date.now()}`;
     setLocalTasks(prev => [{ id: taskId, message: 'Synthesizing visual region…' }, ...prev]);
 
     try {
-      await new Promise(r => setTimeout(r, 50)); // allow repaint before canvas grab
+      await new Promise(r => setTimeout(r, 50)); // flush repaint before screenshot
 
-      // left/top are clientX/Y (viewport coords).
-      // html2canvas x/y are relative to the captured element in document space.
-      // Formula: (clientCoord - elementRect.offset) + scrollPosition
+      const scrollX = window.scrollX || window.pageXOffset;
+      const scrollY = window.scrollY || window.pageYOffset;
 
-      const rect = contentRef.current.getBoundingClientRect();
+      console.log('[CaptureFlow] capture:', { left, top, width, height, scrollX, scrollY });
 
-      const canvas = await window.html2canvas(contentRef.current, {
+      // Scroll was frozen during drag so scrollX/scrollY = scroll at drag-start.
+      // viewport coord + scroll = document coord — correct for html2canvas(document.body).
+      const canvas = await window.html2canvas(document.body, {
         useCORS: true,
         scale: 1,
-
-        // Convert document coords → element-relative coords
-        x:               left - (rect.left + window.scrollX),
-        y:               top - (rect.top + window.scrollY),
+        x: left + scrollX,
+        y: top  + scrollY,
         width,
         height,
         backgroundColor: null,
       });
 
+      console.log('[CaptureFlow] canvas:', canvas.width, 'x', canvas.height);
+
       const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+      console.log('[CaptureFlow] base64 length:', base64?.length, '— firing pipeline');
       await ingestArtifacts(base64, null, taskId);
     } catch (err) {
-      console.error('Capture error:', err);
+      console.error('[CaptureFlow] Capture error:', err);
       setLocalTasks(prev => prev.filter(t => t.id !== taskId));
     }
   };
@@ -1247,12 +1212,7 @@ export default function App() {
           {selection.active && (
             <div
               className="absolute border-2 border-blue-500 bg-blue-500/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.08)]"
-              style={{
-                left:   boxLeft - window.scrollX,
-                top:    boxTop - window.scrollY,
-                width:  boxWidth,
-                height: boxHeight,
-              }}
+              style={{ left: boxLeft, top: boxTop, width: boxWidth, height: boxHeight }}
             />
           )}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
