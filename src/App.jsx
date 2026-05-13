@@ -548,7 +548,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen]     = useState(false);
   const [activeTab, setActiveTab]             = useState('data');
   const [contextMenu, setContextMenu]         = useState({ show: false, x: 0, y: 0 });
-  const [selection, setSelection]             = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0, active: false });
+  const [selection, setSelection]             = useState({ startX: 0, startY: 0, startScrollX: 0, startScrollY: 0, currentX: 0, currentY: 0, active: false });
+  const [scrollPosition, setScrollPosition]    = useState({ x: 0, y: 0 });
   const [isCanvasReady, setIsCanvasReady]     = useState(false);
 
   const contentRef = useRef(null);
@@ -655,6 +656,10 @@ export default function App() {
       if (y > window.innerHeight - threshold)  window.scrollBy(0,  speed);
       if (x < threshold)                       window.scrollBy(-speed, 0);
       if (x > window.innerWidth  - threshold)  window.scrollBy( speed, 0);
+      setScrollPosition({
+        x: window.scrollX || window.pageXOffset,
+        y: window.scrollY || window.pageYOffset,
+      });
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -665,10 +670,13 @@ export default function App() {
     if (!isSelectingMode) return;
     const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    const scrollX = window.scrollX || window.pageXOffset;
+    const scrollY = window.scrollY || window.pageYOffset;
     clientPosRef.current = { x, y };
+    setScrollPosition({ x: scrollX, y: scrollY });
     // Freeze body scroll — prevents coordinate drift during drag
     document.body.style.overflow = 'hidden';
-    setSelection({ startX: x, startY: y, currentX: x, currentY: y, active: true });
+    setSelection({ startX: x, startY: y, startScrollX: scrollX, startScrollY: scrollY, currentX: x, currentY: y, active: true });
     startAutoScroll();
   };
 
@@ -685,18 +693,21 @@ export default function App() {
     stopAutoScroll();
     // Restore scrolling
     document.body.style.overflow = '';
-    const left   = Math.min(selection.startX, selection.currentX);
-    const top    = Math.min(selection.startY, selection.currentY);
-    const width  = Math.abs(selection.currentX - selection.startX);
-    const height = Math.abs(selection.currentY - selection.startY);
+    const startDocX = selection.startX + selection.startScrollX;
+    const startDocY = selection.startY + selection.startScrollY;
+    const currentDocX = selection.currentX + (scrollPosition.x || 0);
+    const currentDocY = selection.currentY + (scrollPosition.y || 0);
+    const left   = Math.min(startDocX, currentDocX);
+    const top    = Math.min(startDocY, currentDocY);
+    const width  = Math.abs(currentDocX - startDocX);
+    const height = Math.abs(currentDocY - startDocY);
     setSelection(prev => ({ ...prev, active: false }));
     if (width < 15 || height < 15) { setIsSelectingMode(false); return; }
     processCapture(left, top, width, height);
   };
 
   // ── 7. Core capture + AI + persist pipeline ──────────────────
-  // left/top/width/height are viewport (client) coords — scroll is frozen during drag.
-  // We capture document.body so x/y = clientCoord + scrollOffset = document coords.
+  // left/top/width/height are document coords, anchored to the scroll position at drag start.
   const processCapture = async (left, top, width, height) => {
     if (!isCanvasReady) return;
     setIsSelectingMode(false);
@@ -707,16 +718,11 @@ export default function App() {
     try {
       await new Promise(r => setTimeout(r, 50)); // flush repaint before screenshot
 
-      const scrollX = window.scrollX || window.pageXOffset;
-      const scrollY = window.scrollY || window.pageYOffset;
-
-      // Scroll was frozen during drag so scrollX/scrollY = scroll at drag-start.
-      // viewport coord + scroll = document coord — correct for html2canvas(document.body).
       const canvas = await window.html2canvas(document.body, {
         useCORS: true,
         scale: 1,
-        x: left + scrollX,
-        y: top  + scrollY,
+        x: left,
+        y: top,
         width,
         height,
         backgroundColor: null,
@@ -799,10 +805,12 @@ export default function App() {
     }
   }, []);
 
-  const boxLeft   = Math.min(selection.startX, selection.currentX);
-  const boxTop    = Math.min(selection.startY, selection.currentY);
-  const boxWidth  = Math.abs(selection.currentX - selection.startX);
-  const boxHeight = Math.abs(selection.currentY - selection.startY);
+  const anchoredStartX = selection.startX + (selection.startScrollX - scrollPosition.x);
+  const anchoredStartY = selection.startY + (selection.startScrollY - scrollPosition.y);
+  const boxLeft   = Math.min(anchoredStartX, selection.currentX);
+  const boxTop    = Math.min(anchoredStartY, selection.currentY);
+  const boxWidth  = Math.abs(selection.currentX - anchoredStartX);
+  const boxHeight = Math.abs(selection.currentY - anchoredStartY);
 
   // ─────────────────────────────────────────────────────────────
   return (
