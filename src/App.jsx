@@ -19,6 +19,24 @@ const GROQ_BASE  = 'https://api.groq.com/openai/v1';
 const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 
 // ============================================================
+// PREPROCESSING — UI noise filter
+// ============================================================
+const UI_NOISE = [
+  'Home', 'Menu', 'Search', 'Login', 'Sign Up', 'Navigation', 'Skip to content',
+  'Subscribe', 'Subscribe Now', 'Privacy', 'Terms', 'Contact', 'About', 'Profile'
+];
+
+const cleanOcrText = (text) => {
+  if (!text) return '';
+  const lines = text.split(/\r?\n/);
+  const cleaned = lines
+    .map(l => l.trim())
+    .filter(l => l && l.length > 2 && !UI_NOISE.includes(l) && !/^\d+$/.test(l))
+    .filter(l => l.length > 2 || /[a-zA-Z]/.test(l));
+  return cleaned.join('\n');
+};
+
+// ============================================================
 // SUPABASE CLIENT
 // ============================================================
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -74,7 +92,8 @@ const extractTextFromCanvas = async (canvas) => {
       try {
         const result = await window.Tesseract.recognize(canvas, 'eng');
         const text = result?.data?.text?.trim();
-        if (text && text.length > 5) return `OCR result:\n${text}`;
+        const cleaned = cleanOcrText(text);
+        if (cleaned && cleaned.length > 5) return `OCR result:\n${cleaned}`;
       } catch (e) {
         // fall through to heuristic
       }
@@ -112,24 +131,14 @@ const extractTextFromCanvas = async (canvas) => {
 // stored; the AI extracts structure from a content description prompt.
 const extractKnowledge = async (base64Image = null, textContext = null) => {
   try {
+    const cleanedText = cleanOcrText(textContext || '');
+
     const userContent = base64Image
-      ? 'A screenshot has been captured from the page. Analyze what is likely in a typical web page screenshot and extract all visible information into structured knowledge artifacts. Focus on text content, headings, key concepts, and data visible in the capture.'
-      : `Analyze the following text source. Extract the core concepts into highly structured knowledge artifacts.
+      ? `The following is OCR extracted text from a screenshot capture.\n\nBEGIN OCR TEXT\n----------------\n${cleanedText}\n----------------\nEND OCR TEXT\n\nExtract only the meaningful informational content from the OCR text. Ignore UI chrome, navigation, menus, buttons, and layout.`
+      : `Analyze the following text source. Extract the core concepts into highly structured knowledge artifacts.\n\nBEGIN TEXT\n----------------\n${cleanedText}\n----------------\nEND TEXT`;
 
-${textContext}`;
+    const systemPrompt = `You are an information extraction engine inside a cognitive capture system.\n\nYour job: extract and summarize the MEANINGFUL INFORMATION contained within captured content.\n\nDo NOT describe:\n- UI elements\n- buttons\n- menus\n- layouts\n- navigation components\n- webpage structure\n\nDo NOT explain what interface components are used for.\n\nInstead:\n- identify the core informational content\n- summarize articles, notes, messages, or visible text\n- extract key ideas, facts, action items, concepts, and insights\n- preserve important technical or contextual details\n- ignore repetitive interface noise\n\nReturn ONLY valid JSON in this exact format, no markdown, no explanation:\n{\n  "artifacts": [\n    {\n      "title": "Short descriptive title",\n      "category": "Category name",\n      "content": "Detailed extracted content",\n      "tags": ["tag1", "tag2"]\n    }\n  ]\n}`;
 
-    const systemPrompt = `You are a knowledge extraction engine. Given content, extract structured artifacts.
-Return ONLY valid JSON in this exact format, no markdown, no explanation:
-{
-  "artifacts": [
-    {
-      "title": "Short descriptive title",
-      "category": "Category name",
-      "content": "Detailed extracted content",
-      "tags": ["tag1", "tag2"]
-    }
-  ]
-}`;
     const text = await callGroq(`${systemPrompt}\n\n${userContent}`, { temperature: 0.1, maxTokens: 2048 });
     const start  = text.indexOf('{');
     const end    = text.lastIndexOf('}');
